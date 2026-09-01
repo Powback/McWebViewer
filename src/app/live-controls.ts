@@ -122,6 +122,14 @@ export class LiveControls {
   private mouseDrag: { x: number; y: number; dug: boolean } | null = null;
   /** Whether this class currently believes the dig button is held. See `setDig`. */
   private digging = false;
+  /**
+   * Latched for exactly one input frame.
+   *
+   * The bridge's jump is EDGE-triggered — `player <name> jump once` fires on any input
+   * frame with `jump: true` — so a held flag would jump again every time the stick changed
+   * direction. Set, sent, cleared.
+   */
+  private jumpOnce = false;
 
   readonly diag: InputDiagnostics = { rawKeys: 0, tried: 0, touches: 0, lockError: '' };
 
@@ -167,6 +175,7 @@ export class LiveControls {
     this.bindKeyboard();
     this.bindMouse();
     this.bindTouch();
+    this.bindSafetyRelease();
     // The server spawns the bot facing whatever IT chose, which has nothing to do with
     // where this camera is pointing. Push the browser's look straight away, so the first
     // W goes where the player is looking instead of wherever the bot happened to face.
@@ -187,6 +196,22 @@ export class LiveControls {
     this.lookDirty = false;
     this.digging = false;
     this.target = null;
+  }
+
+  /**
+   * The stops that have nothing to do with the pointer.
+   *
+   * On desktop a dig always ends in a `mouseup` or a `pointerlockchange`, and both were
+   * relied on. NEITHER EXISTS ON A PHONE. Switching apps, taking a call or locking the
+   * screen with the Mine button held delivers no release event to the button at all, and
+   * the bot is left attacking until somebody notices. These two are the only events that
+   * still arrive in that case.
+   */
+  private bindSafetyRelease(): void {
+    this.on(document, 'visibilitychange', () => {
+      if (document.hidden) this.releaseAll();
+    });
+    this.on(window, 'blur', () => this.releaseAll());
   }
 
   /**
@@ -420,11 +445,52 @@ export class LiveControls {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // What the on-screen buttons call.
+  //
+  // THE STICK AND THE LOOK DRAG WERE THE WHOLE OF THE TOUCH SURFACE, and every remaining
+  // verb — jump, mine, place — was bound to a key or a mouse button that a phone cannot
+  // produce. Measured on an emulated iPhone against the live bridge: a tap, a 1.2 s hold
+  // and a two-finger tap each produced ZERO intents on the wire, while the same session's
+  // stick and look drag produced `input` and `look` normally. So the gestures are not
+  // subtly wrong, they were never bound; these three entry points are what the pad drives.
+  //
+  // They live here rather than in the pad because this class is the one place that knows
+  // whether the controls are bound at all, and it owns `diag.tried`.
+
   /**
-   * The single owner of the dig hold.
+   * Jump. Sent as an ordinary input frame, because that is what the bridge understands —
+   * there is no separate jump verb in the protocol.
+   */
+  touchJump(): void {
+    if (!this.bound) return;
+    this.jumpOnce = true;
+    this.sendControls();
+    this.jumpOnce = false;
+  }
+
+  /**
+   * Mine. PRESS AND HOLD, not a tap: the server decides how long a block takes to break,
+   * so the browser's only job is to say when the button went down and when it came up. A
+   * tap handler would send both edges within a frame and never break anything harder than
+   * a torch, which is indistinguishable from "mining does not work".
+   */
+  touchDig(down: boolean): void {
+    if (!this.bound) return;
+    this.setDig(down);
+  }
+
+  /** Place / use, from the pad's own button rather than a right-click a phone cannot do. */
+  touchUse(): void {
+    if (!this.bound) return;
+    this.use();
+  }
+
+  /**
+   * The single owner of the dig hold, for the mouse and the on-screen button alike.
    *
    * De-duplicated because the release is bound in several places on purpose (button up,
-   * pointer unlocked, a panel taking the keyboard) and they routinely fire together;
+   * finger off the button, tab hidden, window blurred) and they routinely fire together;
    * without this each one would put another frame on the wire. `force` re-states a release
    * this class already believes happened — used only when the page loses input entirely,
    * where being wrong costs a bot that mines forever.
@@ -532,6 +598,7 @@ export class LiveControls {
     for (const control of Object.values(CONTROL_KEYS)) msg[control] = false;
     for (const code of this.held) msg[CONTROL_KEYS[code]] = true;
     if (this.stickDir) msg[this.stickDir] = true;
+    if (this.jumpOnce) msg.jump = true;
     this.send(msg);
   }
 

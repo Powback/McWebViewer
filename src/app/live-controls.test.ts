@@ -234,6 +234,112 @@ test('flushLook owes nothing when nothing was suppressed', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// The on-screen action buttons.
+//
+// THE REGRESSION THESE PIN. Driven on an emulated iPhone against the live bridge, the
+// touch surface produced `input` for the stick and `look` for the drag — and NOTHING at
+// all for a tap, a 1.2 second hold or a two-finger tap. Jump, mine and place were bound
+// only to Space, the left mouse button and the right mouse button, none of which a phone
+// can produce, so the page took every gesture and had no verb to spend it on.
+
+test('a phone can jump: the pad puts a jump on an ordinary input frame', () => {
+  const { controls, sent } = harness();
+  controls.bind();
+  sent.length = 0;
+
+  controls.touchJump();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].t, 'input', 'the protocol has no jump verb; it rides an input frame');
+  assert.equal(sent[0].jump, true);
+});
+
+/**
+ * The bridge fires `player <name> jump once` on ANY input frame carrying `jump: true`, so
+ * a flag left latched jumps again the next time the stick changes direction — walking a
+ * phone player across a field would pogo the whole way.
+ */
+test('the jump is edge-triggered and does not ride the next input frame', () => {
+  const { controls, sent, touch } = harness();
+  controls.bind();
+  controls.touchJump();
+  sent.length = 0;
+
+  touch('touchstart', [{ identifier: 1, clientX: 200, clientY: 300 }]);
+  touch('touchmove', [{ identifier: 1, clientX: 200, clientY: 240 }]);
+
+  assert.equal(sent.at(-1)!.t, 'input');
+  assert.equal(sent.at(-1)!.jump, false, 'the jump must not repeat on the next input frame');
+});
+
+test('a phone can mine: the pad holds the button, it does not tap it', () => {
+  const { controls, sent } = harness();
+  controls.bind();
+  sent.length = 0;
+
+  controls.touchDig(true);
+  assert.deepEqual(sent, [{ t: 'dig', down: true }]);
+
+  // Minecraft breaks blocks over TIME and the server owns that timer. A tap handler would
+  // put both edges on the wire inside one frame and never break anything.
+  controls.touchDig(false);
+  assert.deepEqual(sent.at(-1), { t: 'dig', down: false });
+});
+
+test('a repeated release does not put a second stop on the wire', () => {
+  const { controls, sent } = harness();
+  controls.bind();
+  controls.touchDig(true);
+  sent.length = 0;
+
+  // The pad binds its release on the window in four places on purpose — a finger that
+  // slides off the button never delivers touchend to it — so they routinely all fire.
+  controls.touchDig(false);
+  controls.touchDig(false);
+  controls.touchDig(false);
+  assert.deepEqual(sent, [{ t: 'dig', down: false }]);
+});
+
+test('a phone can place: the pad has the verb the right mouse button had', () => {
+  const { controls, sent } = harness();
+  controls.bind();
+  sent.length = 0;
+
+  controls.touchUse();
+  assert.deepEqual(kinds(sent), ['use']);
+});
+
+test('the pad is inert before Join, so it cannot drive a bot that does not exist', () => {
+  const { controls, sent } = harness();
+  sent.length = 0;
+
+  controls.touchJump();
+  controls.touchDig(true);
+  controls.touchUse();
+  assert.deepEqual(sent, []);
+});
+
+/**
+ * A PHONE GETS NO MOUSEUP AND NO POINTERLOCKCHANGE. Switching apps or taking a call with
+ * the Mine button held used to leave the bot attacking with nothing to stop it — the two
+ * events the release relied on are both desktop-only.
+ */
+test('hiding the tab releases a held dig', () => {
+  const { controls, sent, doc } = harness();
+  controls.bind();
+  controls.touchDig(true);
+  sent.length = 0;
+
+  (doc as unknown as { hidden: boolean }).hidden = true;
+  doc.dispatchEvent(new Event('visibilitychange'));
+
+  assert.ok(
+    sent.some((m) => m.t === 'dig' && m.down === false),
+    'a backgrounded tab must not leave a bot mining',
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Pointer lock, and surviving without it.
 
 test('with no pointer lock, dragging the mouse still turns the view', async () => {

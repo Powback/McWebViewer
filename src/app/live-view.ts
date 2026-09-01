@@ -29,6 +29,7 @@ import {
 } from './region-sync.js';
 import { ObserverClient, describeControl, describeFlush, type ControlState, type LivePlayer, type SelfSample } from './live.js';
 import { LiveControls } from './live-controls.js';
+import { TouchPad } from './touch-pad.js';
 import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
 
@@ -65,6 +66,7 @@ export interface LiveViewDeps {
 export class LiveView {
   readonly client: ObserverClient;
   readonly controls: LiveControls;
+  readonly pad: TouchPad;
   readonly hud: PlayHud;
   private watcher: RegionWatcher;
   private icons: ItemIcons | null = null;
@@ -113,6 +115,15 @@ export class LiveView {
       onChat: () => this.hud.openChat(),
       onUseBlock: (pos) => this.client.send({ t: 'openBlock', x: pos[0], y: pos[1], z: pos[2] }),
     });
+    // The pad drives the SAME entry points the mouse and keyboard drive, so a phone and a
+    // desktop cannot drift apart in what they are able to do.
+    this.pad = new TouchPad({
+      root: deps.hudRoot,
+      onDig: (down) => this.controls.touchDig(down),
+      onUse: () => this.controls.touchUse(),
+      onJump: () => this.controls.touchJump(),
+      onInventory: () => this.hud.toggleInventory(),
+    });
   }
 
   /**
@@ -135,6 +146,9 @@ export class LiveView {
   private onControl(control: ControlState): void {
     if (control.joined) this.controls.bind();
     else this.controls.unbind();
+    // The pad is only ever shown over controls that are actually bound: a MINE button on
+    // a page that cannot mine is the same lie as controls that accept input and drop it.
+    this.pad.setVisible(control.joined === true);
     this.hud.setVisible(control.joined === true);
     if (!control.joined) this.smoothed = null;
     this.onControlChange?.(control);
@@ -331,6 +345,12 @@ export class LiveView {
    * "watching" and "playing" are the same page with the camera owned by different things.
    */
   updateCamera(dt: number): boolean {
+    // A device that claimed a fine pointer but is being driven by a finger reveals the pad
+    // the moment a real touch lands. `(pointer: coarse)` is a good guess and not a
+    // guarantee, and the cost of guessing wrong is a player with no mine button.
+    if (this.controls.diag.touches > 0 && this.controls.active && !this.pad.visible) {
+      this.pad.setVisible(true, true);
+    }
     if (!this.controls.active) return false;
     // Owed look intents go out here rather than from the input handlers, so the last
     // fraction of a gesture is not lost to the throttle. Cheap and idempotent.
@@ -394,7 +414,8 @@ export class LiveView {
       ? `${c.lastAck.of} ${((performance.now() - c.lastAck.at) / 1000).toFixed(1)}s`
         + (c.lastAck.driving ? ' driving' : ' IDLE')
       : 'none';
-    return `input: bound=${yn(this.controls.active)} lock=${yn(this.controls.pointerLocked)}`
+    return `input: pad=${yn(this.pad.visible)}`
+      + ` bound=${yn(this.controls.active)} lock=${yn(this.controls.pointerLocked)}`
       + ` fine=${yn(this.controls.pointerFine)} touch=${d.touches}`
       + ` keys=${this.controls.heldNames.join(',') || '-'}`
       + ` raw=${d.rawKeys} try=${d.tried} sent=${c.sent} drop=${c.dropped} ack=${ack}`

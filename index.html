@@ -122,6 +122,54 @@
         font: 700 15px ui-monospace, Menlo, monospace;
       }
       .mcwv-death[hidden] { display: none; }
+
+      /* ---- on-screen action pad ----------------------------------------------
+         A phone has no keyboard and no second mouse button, so jump, mine and place
+         have nowhere else to live. Bottom-right: the hotbar owns the bottom centre,
+         chat the bottom left, and the movement stick is the LEFT half of the canvas —
+         so this is the only corner a right thumb can reach without fighting anything.
+         The container ignores pointer events so the look drag still works between the
+         buttons; only the buttons themselves take input. */
+      .mcwv-pad {
+        position: fixed; z-index: 4; right: 10px;
+        bottom: calc(70px + env(safe-area-inset-bottom));
+        display: grid; grid-template-columns: repeat(2, 66px); gap: 8px;
+        pointer-events: none;
+      }
+      .mcwv-pad[hidden] { display: none; }
+      .mcwv-pad-btn {
+        pointer-events: auto;
+        /* 66px: comfortably past the 44px minimum touch target, because these are
+           pressed under time pressure with a thumb that is also holding the phone. */
+        width: 66px; height: 66px; border-radius: 50%;
+        border: 2px solid rgba(255,255,255,.35); background: rgba(0,0,0,.45);
+        color: #fff; font: 700 12px/1 ui-monospace, Menlo, monospace;
+        display: flex; align-items: center; justify-content: center;
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent; cursor: pointer;
+      }
+      /* MINE is the one that is held rather than tapped, so it is the one that has to
+         look held — otherwise "am I mining?" is unanswerable from the screen. */
+      .mcwv-pad-btn.held { background: #b3402f; border-color: #fff; }
+      .mcwv-pad-mine { background: rgba(140,40,30,.5); }
+      .mcwv-pad-use { background: rgba(30,90,140,.5); }
+      .mcwv-pad-jump { background: rgba(40,120,70,.5); }
+      .mcwv-pad-inv { font-size: 11px; }
+
+      /* Where MINE and PLACE are aiming. On desktop the locked mouse is its own
+         crosshair; on touch there is nothing at all without this, and "mining does
+         not work" is often "mining works and you were aiming at the sky". */
+      .mcwv-crosshair {
+        position: fixed; top: 50%; left: 50%; z-index: 3;
+        width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none;
+        background:
+          linear-gradient(#fff, #fff) 8px 0 / 2px 18px no-repeat,
+          linear-gradient(#fff, #fff) 0 8px / 18px 2px no-repeat;
+        /* `difference` rather than a fixed colour: it is the only blend that guarantees
+           contrast against grass, stone, sky and a dark cave alike. */
+        opacity: .9; mix-blend-mode: difference;
+      }
+      .mcwv-crosshair[hidden] { display: none; }
     </style>
   </head>
   <body>

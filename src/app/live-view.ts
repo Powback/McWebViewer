@@ -30,6 +30,7 @@ import {
 import { ObserverClient, describeControl, describeFlush, type ControlState, type LivePlayer, type SelfSample } from './live.js';
 import { LiveControls } from './live-controls.js';
 import { IsoView, type CameraMode } from './iso-view.js';
+import { navWorld } from './nav-world.js';
 import { TouchPad } from './touch-pad.js';
 import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
@@ -129,6 +130,9 @@ export class LiveView {
       canvas: deps.viewer.renderer.domElement,
       camera: deps.viewer.camera,
       world: deps.world,
+      // The same chunks the renderer holds, asked what a walking body needs to know. The
+      // planner is CLIENT-SIDE for exactly this reason: the data is already here.
+      nav: navWorld(deps.world),
       send: (msg) => this.client.send(msg),
       setSubject: (pos) => deps.viewer.setSubject(pos),
     });
@@ -508,7 +512,9 @@ export class LiveView {
       ? `${c.lastAck.of} ${((performance.now() - c.lastAck.at) / 1000).toFixed(1)}s`
         + (c.lastAck.driving ? ' driving' : ' IDLE')
       : 'none';
-    return `input: mode=${this.mode}${this.iso.active ? '(bound)' : ''}`
+    const walk = this.iso.active
+      ? ` walk=${this.iso.walkStatus.replace(' ', '-')}(${this.iso.plannedPath.length})` : '';
+    return `input: mode=${this.mode}${this.iso.active ? '(bound)' : ''}${walk}`
       + ` pad=${yn(this.pad.visible)}`
       + ` bound=${yn(this.controls.active)} lock=${yn(this.controls.pointerLocked)}`
       + ` fine=${yn(this.controls.pointerFine)} touch=${d.touches}`

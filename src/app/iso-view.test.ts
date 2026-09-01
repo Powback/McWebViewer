@@ -24,11 +24,22 @@ import { PerspectiveCamera } from 'three';
 import { IsoView } from './iso-view.js';
 import type { ControlIntent } from './live-controls.js';
 import type { VoxelSource } from './raycast.js';
+import type { NavClass, NavWorld } from './pathfind.js';
 
 const GROUND_Y = 64;
 
 /** Solid everywhere below `GROUND_Y`, sky above — so the top face of the world is y=63. */
 const flatWorld: VoxelSource = { getState: (_x, y) => (y < GROUND_Y ? 1 : 0) };
+
+/** The same shape of world the picker sees, in the terms the planner asks in. */
+function navFrom(solid: (x: number, y: number, z: number) => boolean): NavWorld {
+  return {
+    classify: (x, y, z): NavClass => (solid(x, y, z) ? 'solid' : 'air'),
+    known: () => true,
+  };
+}
+
+const flatNav = navFrom((_x, y) => y < GROUND_Y);
 
 interface Harness {
   iso: IsoView;
@@ -39,7 +50,7 @@ interface Harness {
   touch: (type: string, points: Array<{ identifier: number; clientX: number; clientY: number }>) => void;
 }
 
-function harness(world: VoxelSource = flatWorld): Harness {
+function harness(world: VoxelSource = flatWorld, nav: NavWorld = flatNav): Harness {
   const canvas = Object.assign(new EventTarget(), { clientWidth: 800, clientHeight: 600 });
   (globalThis as Record<string, unknown>).window = new EventTarget();
   (globalThis as Record<string, unknown>).document = new EventTarget();
@@ -51,6 +62,7 @@ function harness(world: VoxelSource = flatWorld): Harness {
     canvas: canvas as unknown as HTMLCanvasElement,
     camera,
     world,
+    nav,
     send: (m) => sent.push(m),
     setSubject: (pos) => subject.push(pos),
   });
@@ -146,6 +158,7 @@ test('the camera is placed before the subject is announced', () => {
     canvas: canvas as unknown as HTMLCanvasElement,
     camera,
     world: flatWorld,
+    nav: flatNav,
     send: () => {},
     setSubject: () => seen.push(camera.position.y),
   });
@@ -158,6 +171,29 @@ test('the camera is placed before the subject is announced', () => {
 
 // ---------------------------------------------------------------------------
 // Click to move
+//
+// The route is worked out in pathfind.ts and pinned there. What is pinned HERE is the
+// join: that a tap becomes a goal, that the search runs on a frame budget without moving
+// the character, that the steering is handed one waypoint at a time, and — the thing this
+// replaced — that a walk with no route stands still and says so instead of shoving.
+
+/** Run frames until the walk settles, so a test does not have to count search budgets. */
+function settle(
+  iso: IsoView,
+  pos: () => [number, number, number],
+  frames = 60,
+  step = 100,
+): void {
+  for (let i = 0; i < frames; i++) {
+    iso.update(pos(), 1000 + i * step);
+    // One more frame once the search has answered: the frame that finds a route does not
+    // also steer along it, so a caller that stopped here would see a plan and no movement.
+    if (iso.walkStatus !== 'planning') {
+      iso.update(pos(), 1000 + (i + 1) * step);
+      return;
+    }
+  }
+}
 
 test('tapping the ground walks the character there, and stops it on arrival', () => {
   const { iso, sent, touch } = harness();
@@ -172,23 +208,67 @@ test('tapping the ground walks the character there, and stops it on arrival', ()
   const target = iso.walkTarget;
   assert.ok(target, 'a tap on solid ground must produce a destination');
   assert.equal(target![1], GROUND_Y, 'the character stands ON the block, not inside it');
-  assert.equal(target![0] % 1, 0.5, 'centred on the block it tapped');
 
-  // Far from it: face it and hold forward.
-  iso.update(at(100, 200), 1000);
+  settle(iso, () => at(100, 200));
+  assert.equal(iso.walkStatus, 'walking');
+  assert.ok(iso.plannedPath.length > 0, 'a route, not a bearing');
+
   const look = sent.find((m) => m.t === 'look');
   const walk = sent.find((m) => m.t === 'input' && m.forward === true);
-  assert.ok(look, 'the body has to be turned toward the target before it walks');
+  assert.ok(look, 'the body has to be turned toward the waypoint before it walks');
   assert.ok(walk, 'and then held forward — there is no goto command on the bridge');
   assert.equal(look!.pitch, 0, 'an RTS character looks where it walks, not at its feet');
 
-  // Standing on it: stop, and say so.
+  // Walk it: step to each waypoint in turn, as the character actually would.
+  const route = [...iso.plannedPath];
   sent.length = 0;
-  iso.update([target![0], GROUND_Y, target![2]], 2000);
+  let t = 2000;
+  for (const cell of route) iso.update([cell[0] + 0.5, cell[1], cell[2] + 0.5], (t += 200));
+  assert.equal(iso.walkStatus, 'arrived');
   assert.equal(iso.walkTarget, null);
   const stop = sent.find((m) => m.t === 'input');
   assert.ok(stop, 'arriving must put a stop frame on the wire');
   assert.equal(stop!.forward, false);
+});
+
+/**
+ * THE FAILURE THIS FEATURE EXISTS TO REMOVE. Steering set off towards any destination and
+ * discovered it was impossible by shoving into it for four seconds. A plan knows before
+ * the first step, so the character must not move at all.
+ */
+test('a destination with no route moves the character not one step', () => {
+  // An island one block wide, surrounded by void. Nothing can be walked to.
+  const island = (x: number, y: number, z: number) => y < GROUND_Y && x === 100 && z === 200;
+  const { iso, sent } = harness(
+    { getState: (x, y, z) => (island(x, y, z) || y < GROUND_Y - 40 ? 1 : 0) },
+    navFrom(island),
+  );
+  iso.bind();
+  iso.update(at(100, 200));
+
+  iso.walkTo(300, 200, 0);
+  sent.length = 0;
+  settle(iso, () => at(100, 200));
+
+  assert.equal(iso.walkStatus, 'no path');
+  assert.equal(iso.walkTarget, null);
+  assert.deepEqual(
+    sent.filter((m) => m.t === 'input' && m.forward === true), [],
+    'it must never have been told to walk',
+  );
+});
+
+test('the search is spread across frames rather than stalling one', () => {
+  // A big open plain, so the search has somewhere to spend a budget.
+  const { iso } = harness();
+  iso.bind();
+  iso.update(at(0, 0));
+  iso.walkTo(300, 200, 0);
+
+  iso.update(at(0, 0), 100);
+  // One frame of search is a bounded number of expansions; the character stands still
+  // while it runs rather than setting off on a guess.
+  assert.ok(['planning', 'walking'].includes(iso.walkStatus));
 });
 
 test('tapping the sky does nothing at all', () => {
@@ -219,38 +299,67 @@ test('a press that travels is a pan, not a destination', () => {
   assert.ok(Math.hypot(iso.panX, iso.panZ) > 0, 'and must actually pan');
 });
 
-// ---------------------------------------------------------------------------
-// Steering is not pathfinding, and has to admit it
-
-test('no progress gets a jump, because a one-block step stops a walk dead', () => {
-  const { iso, sent } = harness();
+/**
+ * The jump is no longer a guess made after 600 ms of getting nowhere. It is read off the
+ * block directly in front of the character — solid at foot level with room above it is a
+ * step up and nothing else — so it fires where a player would make it, and does NOT fire
+ * at a wall it could never climb.
+ */
+test('a block to step onto gets a jump; a wall does not', () => {
+  // A shelf one block high at x >= 105, and a three-block wall at x >= 105 in the z=210 row.
+  const shelf = (x: number, y: number, z: number) => x >= 105 && z < 205 && y < GROUND_Y + 1;
+  const wall = (x: number, y: number, z: number) => x >= 105 && z >= 205 && y < GROUND_Y + 3;
+  const solid = (x: number, y: number, z: number) =>
+    y < GROUND_Y || shelf(x, y, z) || wall(x, y, z);
+  const { iso, sent } = harness({ getState: (x, y, z) => (solid(x, y, z) ? 1 : 0) },
+    navFrom(solid));
   iso.bind();
-  iso.update(at(100, 200));
-  iso.walkTo(300, 200, 0);
-  assert.ok(iso.walkTarget);
 
-  // Pinned against a step: the same position, frame after frame.
-  const stuck = at(100, 200);
-  iso.update(stuck, 0);
+  // Facing the shelf, close enough to step onto it.
+  iso.update([104.5, GROUND_Y, 200.5]);
+  (iso as unknown as { goal: [number, number, number] }).goal = [110, GROUND_Y + 1, 200];
+  (iso as unknown as { walkStatus: string }).walkStatus = 'planning';
+  settle(iso, () => [104.5, GROUND_Y, 200.5]);
+  assert.equal(iso.walkStatus, 'walking');
+
   sent.length = 0;
-  iso.update(stuck, 700);
-
+  iso.update([104.5, GROUND_Y, 200.5], 5000);
   const jump = sent.find((m) => m.t === 'input' && m.jump === true);
-  assert.ok(jump, 'a stuck walk must try to step up before it gives up');
-  assert.equal(jump!.forward, true, 'and must keep walking while it does');
+  assert.ok(jump, 'a block in front at foot level is a step, and a step gets a jump');
+  assert.equal(jump!.forward, true, 'and it must keep walking while it does');
+
+  // Now the wall row: three blocks of it, which no jump can climb.
+  const w2 = harness({ getState: (x, y, z) => (solid(x, y, z) ? 1 : 0) }, navFrom(solid));
+  w2.iso.bind();
+  w2.iso.update([104.5, GROUND_Y, 210.5]);
+  (w2.iso as unknown as { path: Array<[number, number, number]> }).path = [[110, GROUND_Y, 210]];
+  (w2.iso as unknown as { walkStatus: string }).walkStatus = 'walking';
+  (w2.iso as unknown as { goal: [number, number, number] }).goal = [110, GROUND_Y, 210];
+  w2.sent.length = 0;
+  w2.iso.update([104.5, GROUND_Y, 210.5], 5000);
+  assert.deepEqual(
+    w2.sent.filter((m) => m.t === 'input' && m.jump === true), [],
+    'jumping at a three-block wall is the guess this replaced',
+  );
 });
 
-test('a walk that never gets anywhere is abandoned, not left shoving into a wall', () => {
+test('a route the steering cannot follow is abandoned, not shoved at forever', () => {
   const { iso, sent } = harness();
   iso.bind();
   iso.update(at(100, 200));
   iso.walkTo(300, 200, 0);
+  settle(iso, () => at(100, 200));
+  assert.equal(iso.walkStatus, 'walking');
+
+  // Frozen: the same position for far longer than the stuck timer, over every re-plan the
+  // walk is allowed. Re-planning from a place the steering cannot leave gives the same
+  // plan, so this has to end.
   const stuck = at(100, 200);
-  iso.update(stuck, 0);
+  for (let i = 0; i < 200 && (iso.walkStatus as string) !== 'stuck'; i++) {
+    iso.update(stuck, 2000 + i * 500);
+  }
 
-  sent.length = 0;
-  iso.update(stuck, 5000);
-
+  assert.equal(iso.walkStatus, 'stuck');
   assert.equal(iso.walkTarget, null, 'it has to give up eventually');
   const stop = sent.find((m) => m.t === 'input' && m.forward === false);
   assert.ok(stop, 'and stop the character rather than leave it walking');

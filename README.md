@@ -71,10 +71,10 @@ Stated plainly; see ARCHITECTURE.md §6.
 - **Live mode sees blocks, not entities.** Mobs and items are read from the save files at
   load and are not refreshed; a turtle moving shows up (it is a block), a cow walking does
   not. Live *players* come from RCON and do update.
-- **Click-to-move in isometric mode is steering, not pathfinding.** The bridge's command
-  set has no goto in it, so the character faces the point and holds forward. It jumps at a
-  step it cannot walk over and gives up after four seconds of no progress, but it will not
-  walk around a tree. See [Isometric mode](#isometric-mode).
+- **The pathfinder plans over loaded chunks only,** which is what it can see. A
+  destination past the edge of the render distance is refused rather than guessed at, and a
+  long walk is planned in stages as the world streams in. See
+  [Click to move](#click-to-move-actually-pathfinds).
 - **Playing from the browser is off by default** and needs a server-side mod
   (SiliconeDolls). It is installed on the reference server, so the Join button works
   there; on a server without it, the button stays disabled and says why rather than
@@ -520,6 +520,61 @@ three different heights and does not change.
 `V` toggles the mode as well as the button, because on a desktop the button is unreachable
 exactly when you want it — playing in first person means the canvas holds the pointer lock,
 and a locked pointer is captured by the canvas, so a click on the button never arrives.
+
+#### Click to move actually pathfinds
+
+It used to be steering: face the point, hold forward, jump every 600 ms if nothing was
+happening, abandon the walk after four seconds. That was honest about the bridge — its
+whole vocabulary is `move forward|back|left|right` plus `turn`, and there is no goto in it
+— but it walked around nothing, so the first tree ended the walk with the character shoving
+into it.
+
+The route is now planned **in the browser**, over the chunks the viewer is already
+rendering. It knows what is solid, what is air and where the ground is, so nothing new has
+to be asked of the server: **no `goto` verb was added to the bridge.** The plan is fed to
+the same steering, one waypoint at a time.
+
+It models a player rather than a point. The body is two blocks tall, so a cell needs air at
+the feet *and* at head height. It steps up one block, and only with headroom over where it
+is standing. It drops up to three, and only down a column that is actually clear. It will
+not squeeze diagonally through a corner, will not stand in water, lava or fire, and will
+not route through chunks nobody has loaded — `World.getState` answers AIR outside them,
+which reads as walkable and is how a planner marches off the edge of the world.
+
+**It cannot jump a gap, so it does not plan one.** A one-block hole in a walkway is a wall
+to this planner. That is the honest expression of "refuse a route the bot cannot walk":
+there is no such move, so there is no such route, and the walk is refused before the first
+step instead of discovered after four seconds of shoving.
+
+Two things it costs, both deliberate:
+
+- **Bounded and resumable.** This runs on a phone. The search is capped at 6000 node
+  expansions and 64 blocks, and `step(n)` expands at most n nodes per call — 600 per frame,
+  so a full search finishes inside ten frames and no frame pays for more than a fraction of
+  a millisecond. When the cap is hit, a route that gets *meaningfully* closer is walked and
+  re-planned on arrival; one that does not is reported as failure.
+- **The route is straightened before it is walked.** A* on a cell grid returns a staircase,
+  and a follower that re-aims the body at every cell spends its time turning. Measured
+  against the live server before straightening was added: a ten-cell route moved the
+  character **four blocks in sixty seconds**. Collapsing it to the furthest cell still
+  reachable in a straight walk turns that into two or three long legs.
+
+Measured on the live server with `npm run walk-proof`, which drives the deployed page with
+puppeteer and reads every position back off the bridge's RCON poll — so these are the
+server's own coordinates, not the browser's guess. Same start, same destination, 23.5 blocks
+apart with 12 steps of the straight line a walking body cannot take:
+
+| | old steering | planned |
+|---|---|---|
+| travelled | 9.8 blocks | 26.1 blocks |
+| off the straight line, at most | 0.5 blocks | 5.3 blocks |
+| ended up | 13.9 blocks short | **0.6 blocks from the destination** |
+| result | gave up after 6.7 s | arrived in 9.9 s |
+
+And a destination with no route at all — forty blocks straight up, where nothing can stand
+— moves the character **zero blocks** and reports `no path` in 0.15 s. The HUD's input line
+carries `walk=<status>(<legs>)` so "it did not go" can be told apart from "there was no
+route" and "it is still searching" without guessing.
 
 #### Nothing here requires pointer lock
 

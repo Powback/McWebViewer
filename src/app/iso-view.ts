@@ -13,19 +13,21 @@
  * far enough away to read as isometric, and it is a two-line change that is exactly undone
  * on the way out.
  *
- * WHAT THIS IS NOT: PATHFINDING. The bridge's command set (see fake-player.mjs) is
- * `move forward|back|left|right` and `turn` — stateful direction holds, with no goto in
- * it. So "click to move" is implemented honestly as steering: face the point, hold
- * forward, stop on arrival. It walks around nothing. A one-block step or a fence gets a
- * jump (`unstick`), and a walk that stops making progress is ABANDONED rather than left
- * shoving into a wall forever. Told plainly here because the alternative is a feature that
- * looks like pathfinding until the first tree.
+ * CLICK TO MOVE IS PLANNED, NOT STEERED. It used to be steering — face the point, hold
+ * forward, jump on a hunch, give up after four seconds — because the bridge's vocabulary is
+ * `move forward|back|left|right` plus `turn` and has no goto in it. That is still all the
+ * bridge offers; what changed is that the ROUTE is worked out here first, over the same
+ * chunks this view is rendering, and the steering is handed one waypoint at a time. See
+ * pathfind.ts for the planner and what it will and will not agree to walk.
  */
 
 import type { PerspectiveCamera } from 'three';
 import { Vector3 } from 'three';
 import { LOOK_THROTTLE_MS, type ControlIntent } from './live-controls.js';
 import { voxelCast, type VoxelHit, type VoxelSource } from './raycast.js';
+import {
+  nearestStandable, PathPlanner, smoothPath, type Cell, type NavWorld,
+} from './pathfind.js';
 
 /** Which camera owns the screen. Not a launch flag — the UI toggles it. */
 export type CameraMode = 'first' | 'iso';
@@ -51,12 +53,43 @@ const ZOOM_STEP = 1.12;
  */
 const MAX_PAN = 48;
 
-/** Within this many blocks of the tapped point, the walk is done. */
-const ARRIVE_BLOCKS = 1.0;
-/** Progress smaller than this over `GIVE_UP_MS` counts as stuck. */
-const PROGRESS_BLOCKS = 0.15;
-const JUMP_EVERY_MS = 600;
-const GIVE_UP_MS = 4000;
+/**
+ * How close to a waypoint counts as reaching it.
+ *
+ * Waypoints are block CENTRES and the character is 0.6 wide, so this cannot be tight
+ * without the walk stalling on every corner. 0.7 is comfortably inside the next cell.
+ */
+const WAYPOINT_BLOCKS = 0.7;
+/** Waypoints on other floors are not this one; a drop must not tick the next leg early. */
+const WAYPOINT_HEIGHT = 1.6;
+/** How many waypoints ahead an overshoot may be recognised at. See `consume`. */
+const LOOKAHEAD_LEGS = 4;
+/** Progress smaller than this over `STUCK_MS` means the steering is not getting there. */
+const PROGRESS_BLOCKS = 0.05;
+const JUMP_EVERY_MS = 400;
+/**
+ * How long a leg may make no progress before the route is re-planned.
+ *
+ * Much shorter than the four seconds the old steering waited, because this is no longer a
+ * guess: the plan said this leg was walkable, so failing to walk it means the world is not
+ * what the plan thought and the answer is a new plan, not more shoving.
+ */
+const STUCK_MS = 1200;
+/**
+ * How many times a stuck leg may be re-planned before the walk is abandoned.
+ *
+ * Bounded because a re-plan from a position the steering cannot leave produces the same
+ * plan, and repeating that is the four-second shove with extra steps.
+ */
+const MAX_STUCK_REPLANS = 3;
+/**
+ * Node expansions per frame.
+ *
+ * The search is resumable so that a phone never pays for a whole plan in one frame. 600 is
+ * a fraction of a millisecond, and the default 6000-node budget therefore finishes within
+ * ten frames — under 200 ms, which is faster than the character can start walking anyway.
+ */
+const PLAN_BUDGET = 600;
 /** Camera-to-ground can be 160 blocks plus the terrain behind it. */
 const PICK_RANGE = 400;
 
@@ -68,6 +101,8 @@ export interface IsoViewDeps {
   canvas: HTMLCanvasElement;
   camera: PerspectiveCamera;
   world: VoxelSource;
+  /** The same blocks, asked the questions a walking body asks. See nav-world.ts. */
+  nav: NavWorld;
   send: (msg: ControlIntent) => void;
   /**
    * Name the subject that must stay visible, or null to draw everything untouched.
@@ -105,14 +140,33 @@ export class IsoView {
   private gesture: { x: number; y: number; travel: number; at: number } | null = null;
   private pinch = 0;
 
-  /** Where the character has been told to walk, or null when it is standing still. */
-  private target: [number, number, number] | null = null;
+  /** The cell the player asked for, or null when there is no walk in progress. */
+  private goal: Cell | null = null;
+  /** The search, while it is running. Null once it has an answer. */
+  private planner: PathPlanner | null = null;
+  /** The route being walked, and how far along it we are. */
+  private path: Cell[] = [];
+  private leg = 0;
+  /** True when `path` stops short of the goal and has to be extended on arrival. */
+  private pathPartial = false;
+  private stuckReplans = 0;
+  /** Where the current plan was made from, which is where smoothing has to start. */
+  private planStart: Cell = [0, 0, 0];
   private walking = false;
   private sentYaw = NaN;
   private lastLookSent = 0;
-  private lastDist = Infinity;
+  private lastLegDist = Infinity;
   private lastProgressAt = 0;
   private lastJumpAt = 0;
+
+  /**
+   * What the walk is doing, in one word, for the HUD.
+   *
+   * On screen on purpose. "It did not go" has three completely different causes — no route
+   * exists, the route exists and the steering cannot follow it, or the search is still
+   * running — and without this they are one silent failure.
+   */
+  walkStatus: 'idle' | 'planning' | 'walking' | 'arrived' | 'no path' | 'stuck' = 'idle';
 
   constructor(private deps: IsoViewDeps) {}
 
@@ -120,8 +174,14 @@ export class IsoView {
     return this.bound;
   }
 
-  get walkTarget(): [number, number, number] | null {
-    return this.target;
+  /** The destination cell, or null when standing still. */
+  get walkTarget(): Cell | null {
+    return this.goal;
+  }
+
+  /** The route as planned, for the tests and the on-screen count. */
+  get plannedPath(): readonly Cell[] {
+    return this.path;
   }
 
   bind(): void {
@@ -163,7 +223,7 @@ export class IsoView {
   update(pos: readonly [number, number, number], now = performance.now()): void {
     this.place(pos);
     this.deps.setSubject(pos);
-    this.steer(pos, now);
+    this.navigate(pos, now);
   }
 
   // -------------------------------------------------------------------------
@@ -225,15 +285,22 @@ export class IsoView {
    * Returns false when the tap hit sky, which must NOT be treated as "walk somewhere
    * arbitrary" — a tap on the horizon that set off a march to the edge of the render
    * distance is worse than a tap that does nothing.
+   *
+   * Nothing is planned here. Planning needs the character's CURRENT position and this is
+   * an input handler, which runs whenever a thumb lifts; the plan is started on the next
+   * frame, from the position that frame was given.
    */
-  walkTo(clientX: number, clientY: number, now = performance.now()): boolean {
+  walkTo(clientX: number, clientY: number, _now = performance.now()): boolean {
     const hit = this.pick(clientX, clientY);
     if (!hit) return false;
     // Stand ON the block that was tapped, not inside it.
-    this.target = [hit.block[0] + 0.5, hit.block[1] + 1, hit.block[2] + 0.5];
-    this.lastDist = Infinity;
-    this.lastProgressAt = now;
-    this.lastJumpAt = 0;
+    this.goal = [hit.block[0], hit.block[1] + 1, hit.block[2]];
+    this.planner = null;
+    this.path = [];
+    this.leg = 0;
+    this.pathPartial = false;
+    this.stuckReplans = 0;
+    this.walkStatus = 'planning';
     return true;
   }
 
@@ -251,21 +318,216 @@ export class IsoView {
     return voxelCast(this.deps.world, cam, [dir.x, dir.y, dir.z], PICK_RANGE);
   }
 
-  private steer(pos: readonly [number, number, number], now: number): void {
-    if (!this.target) return;
-    const dx = this.target[0] - pos[0];
-    const dz = this.target[2] - pos[2];
-    const d = Math.hypot(dx, dz);
-    if (d <= ARRIVE_BLOCKS) {
-      this.stop();
+  // -------------------------------------------------------------------------
+  // Walking: plan, then follow.
+
+  /** One frame of the walk: keep searching, or take one step along what was found. */
+  private navigate(pos: readonly [number, number, number], now: number): void {
+    if (!this.goal) return;
+    if (this.planner) {
+      // Standing still while the search runs. A character that sets off before it knows
+      // where it is going is the steering this replaced.
+      this.halt();
+      this.advanceSearch();
       return;
     }
+    if (!this.path.length) {
+      this.plan(pos, now);
+      return;
+    }
+    this.follow(pos, now);
+  }
+
+  /**
+   * Start a search from where the character actually is.
+   *
+   * Both ends are snapped to a cell a body can stand in. The start needs it because the
+   * server's position is a float that can sit a hair inside a block or on a slab; the goal
+   * needs it because a tap lands on a block FACE, and the cell above the side of a wall is
+   * not somewhere anyone can stand. Snapping is deliberately short-range — walking
+   * somewhere the player did not point at is its own bug.
+   */
+  private plan(pos: readonly [number, number, number], now: number): void {
+    const nav = this.deps.nav;
+    const here = cellOf(pos);
+    const start = nearestStandable(nav, here, 2) ?? here;
+    const goal = this.goal && nearestStandable(nav, this.goal, 3);
+    if (!goal) {
+      this.giveUp('no path');
+      return;
+    }
+    if (start[0] === goal[0] && start[1] === goal[1] && start[2] === goal[2]) {
+      this.arrive();
+      return;
+    }
+    this.goal = goal;
+    this.planStart = start;
+    this.planner = new PathPlanner(nav, start, goal);
+    this.lastProgressAt = now;
+    this.walkStatus = 'planning';
+  }
+
+  /** Spend one frame's budget on the search, and take the answer if there is one. */
+  private advanceSearch(): void {
+    const planner = this.planner;
+    if (!planner) return;
+    const state = planner.step(PLAN_BUDGET);
+    if (state === 'searching') return;
+    this.planner = null;
+    if (state === 'unreachable' || !planner.path.length) {
+      // THE HONEST GIVE-UP. There is no route, so the character does not move at all —
+      // rather than setting off in the general direction and shoving into a wall for four
+      // seconds, which is what "click to move" used to do here and what it looked like.
+      this.giveUp('no path');
+      return;
+    }
+    // Straightened before it is walked. A* returns a staircase of single cells and the
+    // follower re-aims the body at every one of them; measured against the live server,
+    // that turned a ten-cell route into four blocks of travel in a minute of turning on
+    // the spot. See smoothPath.
+    this.path = smoothPath(this.deps.nav, this.planStart, planner.path);
+    this.pathPartial = planner.partial;
+    this.leg = 0;
+    this.lastLegDist = Infinity;
+    this.walkStatus = 'walking';
+  }
+
+  /** Steer towards the current waypoint, and move on when it is reached. */
+  private follow(pos: readonly [number, number, number], now: number): void {
+    if (this.consume(pos)) {
+      this.lastLegDist = Infinity;
+      this.lastProgressAt = now;
+      this.stuckReplans = 0;
+    }
+    if (this.leg >= this.path.length) {
+      // A partial path ends short of where the player pointed on purpose — the search was
+      // capped. Walking it and planning again from there is the whole point of the cap.
+      if (this.pathPartial) {
+        this.path = [];
+        this.pathPartial = false;
+        this.walkStatus = 'planning';
+        return;
+      }
+      this.arrive();
+      return;
+    }
+    const wp = this.path[this.leg];
+    const dx = wp[0] + 0.5 - pos[0];
+    const dz = wp[2] + 0.5 - pos[2];
+    const d = Math.hypot(dx, dz);
     this.face(dx, dz, now);
     if (!this.walking) {
       this.walking = true;
-      this.sendInput({ forward: true });
+      this.deps.send(inputFrame({ forward: true }));
     }
-    this.unstick(d, now);
+    this.stepUp(pos, dx, dz, now);
+    this.watchProgress(d, now);
+  }
+
+  /**
+   * Tick off every waypoint the character is standing on, and return whether any went.
+   *
+   * It looks a few legs AHEAD rather than only at the current one, because the character
+   * routinely overshoots: the server reports its position ten times a second and it walks
+   * at 4.3 blocks a second, so a late sample can land it past a waypoint entirely. Without
+   * the lookahead the walk would then turn round to collect a waypoint behind it, which
+   * reads as the character dithering — and the whole point of a plan is that the next cell
+   * is already known to be walkable from here.
+   */
+  private consume(pos: readonly [number, number, number]): boolean {
+    const limit = Math.min(this.leg + LOOKAHEAD_LEGS, this.path.length - 1);
+    let hit = -1;
+    for (let i = this.leg; i <= limit; i++) if (this.reached(pos, this.path[i])) hit = i;
+    if (hit < 0) return false;
+    this.leg = hit + 1;
+    return true;
+  }
+
+  private reached(pos: readonly [number, number, number], cell: Cell): boolean {
+    const d = Math.hypot(cell[0] + 0.5 - pos[0], cell[2] + 0.5 - pos[2]);
+    return d <= WAYPOINT_BLOCKS && Math.abs(cell[1] - pos[1]) < WAYPOINT_HEIGHT;
+  }
+
+  /**
+   * Jump when there is a block directly ahead to step onto, and only then.
+   *
+   * Read off the TERRAIN one block in front of the character rather than off the waypoint,
+   * because waypoints are straightened before they are walked (see `smoothPath`) and a
+   * ten-block leg carries no information about where the step in the middle of it is. The
+   * plan has already established the leg is walkable, so a solid block at foot level with
+   * two blocks of air over it is a step up and nothing else.
+   *
+   * The old steering jumped every 600 ms whenever it had stopped making progress, which is
+   * a guess made after the fact and fires just as often at a wall it can never climb.
+   */
+  private stepUp(pos: readonly [number, number, number], dx: number, dz: number, now: number): void {
+    if (now - this.lastJumpAt < JUMP_EVERY_MS) return;
+    const len = Math.hypot(dx, dz);
+    if (!len) return;
+    const ahead = 0.75;
+    const x = Math.floor(pos[0] + (dx / len) * ahead);
+    const z = Math.floor(pos[2] + (dz / len) * ahead);
+    const y = Math.floor(pos[1] + 0.001);
+    const nav = this.deps.nav;
+    if (nav.classify(x, y, z) !== 'solid') return;
+    if (nav.classify(x, y + 1, z) !== 'air' || nav.classify(x, y + 2, z) !== 'air') return;
+    this.lastJumpAt = now;
+    this.deps.send(inputFrame({ forward: true, jump: true }));
+  }
+
+  /**
+   * A leg that stops closing is a leg the world disagrees with the plan about.
+   *
+   * Re-plan rather than push harder: the terrain may have changed under a turtle, or the
+   * character may be caught on geometry the block grid does not model (a fence gate, a
+   * chest lid). A few of those and the walk is given up, because re-planning from a
+   * position the steering cannot leave produces the same plan.
+   */
+  private watchProgress(d: number, now: number): void {
+    if (d < this.lastLegDist - PROGRESS_BLOCKS) {
+      this.lastLegDist = d;
+      this.lastProgressAt = now;
+      return;
+    }
+    if (now - this.lastProgressAt < STUCK_MS) return;
+    if (++this.stuckReplans > MAX_STUCK_REPLANS) {
+      this.giveUp('stuck');
+      return;
+    }
+    this.path = [];
+    this.leg = 0;
+    this.pathPartial = false;
+    this.lastProgressAt = now;
+    this.walkStatus = 'planning';
+  }
+
+  private arrive(): void {
+    this.stop();
+    this.walkStatus = 'arrived';
+  }
+
+  private giveUp(why: 'no path' | 'stuck'): void {
+    this.stop();
+    this.walkStatus = why;
+  }
+
+  /** Cancel the walk and make sure the character is actually told to stand still. */
+  stop(): void {
+    this.goal = null;
+    this.planner = null;
+    this.path = [];
+    this.leg = 0;
+    this.pathPartial = false;
+    this.stuckReplans = 0;
+    this.walkStatus = 'idle';
+    this.halt();
+  }
+
+  /** Release the movement keys, once. Does not touch the plan. */
+  private halt(): void {
+    if (!this.walking) return;
+    this.walking = false;
+    this.deps.send(inputFrame());
   }
 
   /** Point the body at the target. Throttled exactly as mouse-look is, for the same reason. */
@@ -280,47 +542,6 @@ export class IsoView {
     this.deps.send({ t: 'look', yaw, pitch: 0 });
   }
 
-  /**
-   * Steering is not pathfinding, so it gets stuck. A jump clears the overwhelmingly common
-   * case — a one-block step, a slab, a fence post. When even jumping makes no progress the
-   * walk is given up, because a bot holding forward into a wall is indistinguishable on
-   * screen from a bot that has crashed, and it never stops on its own.
-   */
-  private unstick(d: number, now: number): void {
-    if (d < this.lastDist - PROGRESS_BLOCKS) {
-      this.lastDist = d;
-      this.lastProgressAt = now;
-      return;
-    }
-    if (now - this.lastProgressAt > GIVE_UP_MS) {
-      this.stop();
-      return;
-    }
-    if (now - this.lastJumpAt < JUMP_EVERY_MS) return;
-    this.lastJumpAt = now;
-    this.sendInput({ forward: true, jump: true });
-  }
-
-  /** Cancel the walk and make sure the character is actually told to stand still. */
-  stop(): void {
-    this.target = null;
-    if (!this.walking) return;
-    this.walking = false;
-    this.sendInput();
-  }
-
-  /**
-   * Every input frame names every control. The bridge has no memory of what was released,
-   * so a frame that omits a direction is a frame that says nothing about it.
-   */
-  private sendInput(flags: Record<string, boolean> = {}): void {
-    this.deps.send({
-      t: 'input',
-      forward: false, back: false, left: false, right: false,
-      jump: false, sneak: false, sprint: false,
-      ...flags,
-    });
-  }
 
   // -------------------------------------------------------------------------
   // Input
@@ -429,6 +650,24 @@ export class IsoView {
     if (g.travel > TAP_SLOP_PX || performance.now() - g.at > TAP_MS) return;
     this.walkTo(x, y);
   }
+}
+
+/**
+ * Every input frame names every control. The bridge has no memory of what was released, so
+ * a frame that omits a direction is a frame that says nothing about it.
+ */
+function inputFrame(flags: Record<string, boolean> = {}): ControlIntent {
+  return {
+    t: 'input',
+    forward: false, back: false, left: false, right: false,
+    jump: false, sneak: false, sprint: false,
+    ...flags,
+  };
+}
+
+/** The block cell the character's feet are in. */
+function cellOf(pos: readonly [number, number, number]): Cell {
+  return [Math.floor(pos[0]), Math.floor(pos[1] + 0.001), Math.floor(pos[2])];
 }
 
 /** Shortest signed angle, so facing a target never takes the long way round. */

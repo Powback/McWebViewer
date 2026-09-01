@@ -16,6 +16,7 @@
 
 import type { Viewer } from '../render/viewer.js';
 import type { World } from '../render/world.js';
+import { voxelCast, type VoxelHit } from './raycast.js';
 
 /**
  * How often look intents may be sent. The server does not need 500 turns a second.
@@ -535,50 +536,15 @@ export class LiveControls {
   }
 
   /**
-   * Voxel raycast (Amanatides & Woo) from the eye along the view direction, so dig and
-   * place target the same block the crosshair is on.
-   *
-   * `face` is the face the ray ENTERED the hit cell through, which is the previous step's
-   * axis — not the current one. It seeds to +Y so that a ray starting inside a solid block
-   * (standing in gravel) reports a face that can still be placed against.
+   * Voxel raycast from the eye along the view direction, so dig and place target the same
+   * block the crosshair is on. The walk itself is shared with the isometric picker.
    */
-  private raycast(maxDist = 5): { block: [number, number, number]; face: [number, number, number] } | null {
-    const origin = this.deps.viewer.camera.position;
+  private raycast(maxDist = 5): VoxelHit | null {
     const dir: [number, number, number] = [
       -Math.sin(this.yaw) * Math.cos(this.pitch),
       Math.sin(this.pitch),
       -Math.cos(this.yaw) * Math.cos(this.pitch),
     ];
-    const cell = [Math.floor(origin.x), Math.floor(origin.y), Math.floor(origin.z)];
-    const step = dir.map(Math.sign);
-    const tDelta = dir.map((d) => Math.abs(1 / d));
-    const tMax = [
-      boundary(origin.x, dir[0]),
-      boundary(origin.y, dir[1]),
-      boundary(origin.z, dir[2]),
-    ];
-    let face: [number, number, number] = [0, 1, 0];
-
-    // A DDA crosses at most three cell boundaries per block travelled, so this bound is
-    // reached only by a ray that is exactly axis-aligned and never terminates.
-    for (let i = 0; i < maxDist * 4; i++) {
-      if (this.deps.world.getState(cell[0], cell[1], cell[2]) !== 0) {
-        return { block: [cell[0], cell[1], cell[2]], face };
-      }
-      const axis = tMax[0] < tMax[1] && tMax[0] < tMax[2] ? 0 : tMax[1] < tMax[2] ? 1 : 2;
-      cell[axis] += step[axis];
-      tMax[axis] += tDelta[axis];
-      face = [0, 0, 0];
-      face[axis] = -step[axis];
-      if (Math.min(tMax[0], tMax[1], tMax[2]) > maxDist) break;
-    }
-    return null;
+    return voxelCast(this.deps.world, this.deps.viewer.camera.position, dir, maxDist);
   }
-}
-
-/** Distance along the ray to the first cell boundary on this axis. */
-function boundary(pos: number, dir: number): number {
-  if (dir === 0) return Infinity;
-  const f = pos - Math.floor(pos);
-  return (dir > 0 ? 1 - f : f) / Math.abs(dir);
 }

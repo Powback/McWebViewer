@@ -1,0 +1,1356 @@
+{
+  "corpse:corpse": {
+    "renderer": "de.maxhenkel.corpse.entities.CorpseRenderer",
+    "model": "minecraft:player#main",
+    "texture": "assets/minecraft/textures/entity/player/wide/steve.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:player#main", "minecraft:player_slim#main", "minecraft:skeleton#main"],
+    "allTextures": ["assets/minecraft/textures/entity/player/wide/steve.png", "assets/minecraft/textures/entity/skeleton/skeleton.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "manual: CorpseRenderer delegates to the vanilla player renderer (DummyPlayer) or skeleton renderer (DummySkeleton); texture is the dead player's skin at runtime"
+  },
+  "friendsandfoes:copper_golem": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.CopperGolemEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.CopperGolemEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/copper_golem/copper_golem.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.CopperGolemEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/copper_golem/copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/exposed_copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/weathered_copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/oxidized_copper_golem.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:illusioner": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.IllusionerEntityRenderer",
+    "model": "class:net.minecraft.client.model.IllagerModel#createBodyLayer",
+    "texture": "assets/friendsandfoes/textures/entity/illusioner/illusioner.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.minecraft.client.model.IllagerModel#createBodyLayer"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/illusioner/illusioner.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:mauler": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.MaulerEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.MaulerEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/mauler/mauler_badlands.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.MaulerEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/mauler/mauler_badlands.png", "assets/friendsandfoes/textures/entity/mauler/mauler_desert.png", "assets/friendsandfoes/textures/entity/mauler/mauler_savanna.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:moobloom": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.MoobloomEntityRenderer",
+    "model": "class:net.minecraft.client.model.CowModel#createBodyLayer",
+    "texture": "assets/friendsandfoes/textures/entity/moobloom/moobloom_buttercup.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.minecraft.client.model.CowModel#createBodyLayer"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/moobloom/moobloom_buttercup.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:rascal": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.RascalEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.RascalEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/rascal/rascal.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.RascalEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/rascal/rascal.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "minecraft:allay": {
+    "renderer": "net.minecraft.client.renderer.entity.AllayRenderer",
+    "model": "minecraft:allay#main",
+    "texture": "assets/minecraft/textures/entity/allay/allay.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:allay#main"],
+    "allTextures": ["assets/minecraft/textures/entity/allay/allay.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:area_effect_cloud": {
+    "renderer": "net.minecraft.client.renderer.entity.NoopRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:armadillo": {
+    "renderer": "net.minecraft.client.renderer.entity.ArmadilloRenderer",
+    "model": "minecraft:armadillo#main",
+    "texture": "assets/minecraft/textures/entity/armadillo.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:armadillo#main"],
+    "allTextures": ["assets/minecraft/textures/entity/armadillo.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:armor_stand": {
+    "renderer": "net.minecraft.client.renderer.entity.ArmorStandRenderer",
+    "model": "minecraft:armor_stand#main",
+    "texture": "assets/minecraft/textures/entity/armorstand/wood.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:armor_stand#main", "minecraft:armor_stand#inner_armor", "minecraft:armor_stand#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/armorstand/wood.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:arrow": {
+    "renderer": "net.minecraft.client.renderer.entity.TippableArrowRenderer",
+    "model": null,
+    "texture": "assets/minecraft/textures/entity/projectiles/arrow.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/minecraft/textures/entity/projectiles/arrow.png", "assets/minecraft/textures/entity/projectiles/tipped_arrow.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:axolotl": {
+    "renderer": "net.minecraft.client.renderer.entity.AxolotlRenderer",
+    "model": "minecraft:axolotl#main",
+    "texture": "assets/minecraft/textures/entity/axolotl/axolotl_%s.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:axolotl#main"],
+    "allTextures": ["assets/minecraft/textures/entity/axolotl/axolotl_%s.png"],
+    "texturesVerifiedInJars": "0/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:bat": {
+    "renderer": "net.minecraft.client.renderer.entity.BatRenderer",
+    "model": "minecraft:bat#main",
+    "texture": "assets/minecraft/textures/entity/bat.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:bat#main"],
+    "allTextures": ["assets/minecraft/textures/entity/bat.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:bee": {
+    "renderer": "net.minecraft.client.renderer.entity.BeeRenderer",
+    "model": "minecraft:bee#main",
+    "texture": "assets/minecraft/textures/entity/bee/bee.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:bee#main"],
+    "allTextures": ["assets/minecraft/textures/entity/bee/bee_angry.png", "assets/minecraft/textures/entity/bee/bee_angry_nectar.png", "assets/minecraft/textures/entity/bee/bee.png", "assets/minecraft/textures/entity/bee/bee_nectar.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:blaze": {
+    "renderer": "net.minecraft.client.renderer.entity.BlazeRenderer",
+    "model": "minecraft:blaze#main",
+    "texture": "assets/minecraft/textures/entity/blaze.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:blaze#main"],
+    "allTextures": ["assets/minecraft/textures/entity/blaze.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:block_display": {
+    "renderer": "net.minecraft.client.renderer.entity.DisplayRenderer$BlockDisplayRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:boat": {
+    "renderer": "net.minecraft.client.renderer.entity.BoatRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:bogged": {
+    "renderer": "net.minecraft.client.renderer.entity.BoggedRenderer",
+    "model": "minecraft:bogged#inner_armor",
+    "texture": "assets/minecraft/textures/entity/skeleton/bogged.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:bogged#inner_armor", "minecraft:bogged#outer_armor", "minecraft:bogged#main", "minecraft:bogged#outer", "minecraft:skeleton#main", "minecraft:skeleton#inner_armor", "minecraft:skeleton#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/skeleton/bogged.png", "assets/minecraft/textures/entity/skeleton/bogged_overlay.png", "assets/minecraft/textures/entity/skeleton/skeleton.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:breeze": {
+    "renderer": "net.minecraft.client.renderer.entity.BreezeRenderer",
+    "model": "minecraft:breeze#main",
+    "texture": "assets/minecraft/textures/entity/breeze/breeze.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:breeze#main"],
+    "allTextures": ["assets/minecraft/textures/entity/breeze/breeze.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:breeze_wind_charge": {
+    "renderer": "net.minecraft.client.renderer.entity.WindChargeRenderer",
+    "model": "minecraft:wind_charge#main",
+    "texture": "assets/minecraft/textures/entity/projectiles/wind_charge.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wind_charge#main"],
+    "allTextures": ["assets/minecraft/textures/entity/projectiles/wind_charge.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:camel": {
+    "renderer": "net.minecraft.client.renderer.entity.CamelRenderer",
+    "model": "minecraft:camel#main",
+    "texture": "assets/minecraft/textures/entity/camel/camel.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:camel#main"],
+    "allTextures": ["assets/minecraft/textures/entity/camel/camel.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:cat": {
+    "renderer": "net.minecraft.client.renderer.entity.CatRenderer",
+    "model": "minecraft:cat#main",
+    "texture": null,
+    "hasGeometry": true,
+    "allModels": ["minecraft:cat#main"],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:cave_spider": {
+    "renderer": "net.minecraft.client.renderer.entity.CaveSpiderRenderer",
+    "model": "minecraft:cave_spider#main",
+    "texture": "assets/minecraft/textures/entity/spider/cave_spider.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:cave_spider#main", "minecraft:spider#main"],
+    "allTextures": ["assets/minecraft/textures/entity/spider/cave_spider.png", "assets/minecraft/textures/entity/spider/spider.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:chest_boat": {
+    "renderer": "net.minecraft.client.renderer.entity.BoatRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:chest_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:chest_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:chest_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:chicken": {
+    "renderer": "net.minecraft.client.renderer.entity.ChickenRenderer",
+    "model": "minecraft:chicken#main",
+    "texture": "assets/minecraft/textures/entity/chicken.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:chicken#main"],
+    "allTextures": ["assets/minecraft/textures/entity/chicken.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:cod": {
+    "renderer": "net.minecraft.client.renderer.entity.CodRenderer",
+    "model": "minecraft:cod#main",
+    "texture": "assets/minecraft/textures/entity/fish/cod.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:cod#main"],
+    "allTextures": ["assets/minecraft/textures/entity/fish/cod.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:command_block_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:command_block_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:command_block_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:cow": {
+    "renderer": "net.minecraft.client.renderer.entity.CowRenderer",
+    "model": "minecraft:cow#main",
+    "texture": "assets/minecraft/textures/entity/cow/cow.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:cow#main"],
+    "allTextures": ["assets/minecraft/textures/entity/cow/cow.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:creeper": {
+    "renderer": "net.minecraft.client.renderer.entity.CreeperRenderer",
+    "model": "minecraft:creeper#main",
+    "texture": "assets/minecraft/textures/entity/creeper/creeper.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:creeper#main"],
+    "allTextures": ["assets/minecraft/textures/entity/creeper/creeper.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:dolphin": {
+    "renderer": "net.minecraft.client.renderer.entity.DolphinRenderer",
+    "model": "minecraft:dolphin#main",
+    "texture": "assets/minecraft/textures/entity/dolphin.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:dolphin#main"],
+    "allTextures": ["assets/minecraft/textures/entity/dolphin.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:donkey": {
+    "renderer": "net.minecraft.client.renderer.entity.ChestedHorseRenderer",
+    "model": "minecraft:donkey#main",
+    "texture": "assets/minecraft/textures/entity/horse/donkey.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:donkey#main"],
+    "allTextures": ["assets/minecraft/textures/entity/horse/donkey.png", "assets/minecraft/textures/entity/horse/mule.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:dragon_fireball": {
+    "renderer": "net.minecraft.client.renderer.entity.DragonFireballRenderer",
+    "model": null,
+    "texture": "assets/minecraft/textures/entity/enderdragon/dragon_fireball.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/minecraft/textures/entity/enderdragon/dragon_fireball.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:drowned": {
+    "renderer": "net.minecraft.client.renderer.entity.DrownedRenderer",
+    "model": "minecraft:drowned#main",
+    "texture": "assets/minecraft/textures/entity/zombie/drowned.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:drowned#main", "minecraft:drowned#inner_armor", "minecraft:drowned#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/zombie/drowned.png", "assets/minecraft/textures/entity/zombie/zombie.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:egg": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:elder_guardian": {
+    "renderer": "net.minecraft.client.renderer.entity.ElderGuardianRenderer",
+    "model": "minecraft:elder_guardian#main",
+    "texture": "assets/minecraft/textures/entity/guardian_elder.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:elder_guardian#main", "minecraft:guardian#main"],
+    "allTextures": ["assets/minecraft/textures/entity/guardian_elder.png", "assets/minecraft/textures/entity/guardian.png", "assets/minecraft/textures/entity/guardian_beam.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:end_crystal": {
+    "renderer": "net.minecraft.client.renderer.entity.EndCrystalRenderer",
+    "model": "minecraft:end_crystal#main",
+    "texture": "assets/minecraft/textures/entity/end_crystal/end_crystal.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:end_crystal#main"],
+    "allTextures": ["assets/minecraft/textures/entity/end_crystal/end_crystal.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ender_dragon": {
+    "renderer": "net.minecraft.client.renderer.entity.EnderDragonRenderer",
+    "model": "minecraft:ender_dragon#main",
+    "texture": "assets/minecraft/textures/entity/end_crystal/end_crystal_beam.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:ender_dragon#main"],
+    "allTextures": ["assets/minecraft/textures/entity/end_crystal/end_crystal_beam.png", "assets/minecraft/textures/entity/enderdragon/dragon_exploding.png", "assets/minecraft/textures/entity/enderdragon/dragon.png", "assets/minecraft/textures/entity/enderdragon/dragon_eyes.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ender_pearl": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:enderman": {
+    "renderer": "net.minecraft.client.renderer.entity.EndermanRenderer",
+    "model": "minecraft:enderman#main",
+    "texture": "assets/minecraft/textures/entity/enderman/enderman.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:enderman#main"],
+    "allTextures": ["assets/minecraft/textures/entity/enderman/enderman.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:endermite": {
+    "renderer": "net.minecraft.client.renderer.entity.EndermiteRenderer",
+    "model": "minecraft:endermite#main",
+    "texture": "assets/minecraft/textures/entity/endermite.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:endermite#main"],
+    "allTextures": ["assets/minecraft/textures/entity/endermite.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:evoker": {
+    "renderer": "net.minecraft.client.renderer.entity.EvokerRenderer",
+    "model": "minecraft:evoker#main",
+    "texture": "assets/minecraft/textures/entity/illager/evoker.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:evoker#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/evoker.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:evoker_fangs": {
+    "renderer": "net.minecraft.client.renderer.entity.EvokerFangsRenderer",
+    "model": "minecraft:evoker_fangs#main",
+    "texture": "assets/minecraft/textures/entity/illager/evoker_fangs.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:evoker_fangs#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/evoker_fangs.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:experience_bottle": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:experience_orb": {
+    "renderer": "net.minecraft.client.renderer.entity.ExperienceOrbRenderer",
+    "model": null,
+    "texture": "assets/minecraft/textures/entity/experience_orb.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/minecraft/textures/entity/experience_orb.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:eye_of_ender": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:falling_block": {
+    "renderer": "net.minecraft.client.renderer.entity.FallingBlockRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "note": "Rendered as the block state's own block model.",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:fireball": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:firework_rocket": {
+    "renderer": "net.minecraft.client.renderer.entity.FireworkEntityRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:fishing_bobber": {
+    "renderer": "net.minecraft.client.renderer.entity.FishingHookRenderer",
+    "model": null,
+    "texture": "assets/minecraft/textures/entity/fishing_hook.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/minecraft/textures/entity/fishing_hook.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:fox": {
+    "renderer": "net.minecraft.client.renderer.entity.FoxRenderer",
+    "model": "minecraft:fox#main",
+    "texture": "assets/minecraft/textures/entity/fox/fox.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:fox#main"],
+    "allTextures": ["assets/minecraft/textures/entity/fox/fox.png", "assets/minecraft/textures/entity/fox/fox_sleep.png", "assets/minecraft/textures/entity/fox/snow_fox.png", "assets/minecraft/textures/entity/fox/snow_fox_sleep.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:frog": {
+    "renderer": "net.minecraft.client.renderer.entity.FrogRenderer",
+    "model": "minecraft:frog#main",
+    "texture": null,
+    "hasGeometry": true,
+    "allModels": ["minecraft:frog#main"],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:furnace_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:furnace_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:furnace_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ghast": {
+    "renderer": "net.minecraft.client.renderer.entity.GhastRenderer",
+    "model": "minecraft:ghast#main",
+    "texture": "assets/minecraft/textures/entity/ghast/ghast.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:ghast#main"],
+    "allTextures": ["assets/minecraft/textures/entity/ghast/ghast.png", "assets/minecraft/textures/entity/ghast/ghast_shooting.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:giant": {
+    "renderer": "net.minecraft.client.renderer.entity.GiantMobRenderer",
+    "model": "minecraft:giant#main",
+    "texture": "assets/minecraft/textures/entity/zombie/zombie.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:giant#main", "minecraft:giant#inner_armor", "minecraft:giant#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/zombie/zombie.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:glow_item_frame": {
+    "renderer": "net.minecraft.client.renderer.entity.ItemFrameRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:glow_squid": {
+    "renderer": "net.minecraft.client.renderer.entity.GlowSquidRenderer",
+    "model": "minecraft:glow_squid#main",
+    "texture": "assets/minecraft/textures/entity/squid/glow_squid.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:glow_squid#main"],
+    "allTextures": ["assets/minecraft/textures/entity/squid/glow_squid.png", "assets/minecraft/textures/entity/squid/squid.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:goat": {
+    "renderer": "net.minecraft.client.renderer.entity.GoatRenderer",
+    "model": "minecraft:goat#main",
+    "texture": "assets/minecraft/textures/entity/goat/goat.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:goat#main"],
+    "allTextures": ["assets/minecraft/textures/entity/goat/goat.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:guardian": {
+    "renderer": "net.minecraft.client.renderer.entity.GuardianRenderer",
+    "model": "minecraft:guardian#main",
+    "texture": "assets/minecraft/textures/entity/guardian.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:guardian#main"],
+    "allTextures": ["assets/minecraft/textures/entity/guardian.png", "assets/minecraft/textures/entity/guardian_beam.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:hoglin": {
+    "renderer": "net.minecraft.client.renderer.entity.HoglinRenderer",
+    "model": "minecraft:hoglin#main",
+    "texture": "assets/minecraft/textures/entity/hoglin/hoglin.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:hoglin#main"],
+    "allTextures": ["assets/minecraft/textures/entity/hoglin/hoglin.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:hopper_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:hopper_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:hopper_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:horse": {
+    "renderer": "net.minecraft.client.renderer.entity.HorseRenderer",
+    "model": "minecraft:horse#main",
+    "texture": "assets/minecraft/textures/entity/horse/horse_white.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:horse#main"],
+    "allTextures": ["assets/minecraft/textures/entity/horse/horse_white.png", "assets/minecraft/textures/entity/horse/horse_creamy.png", "assets/minecraft/textures/entity/horse/horse_chestnut.png", "assets/minecraft/textures/entity/horse/horse_brown.png", "assets/minecraft/textures/entity/horse/horse_black.png", "assets/minecraft/textures/entity/horse/horse_gray.png", "assets/minecraft/textures/entity/horse/horse_darkbrown.png"],
+    "texturesVerifiedInJars": "7/7",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:husk": {
+    "renderer": "net.minecraft.client.renderer.entity.HuskRenderer",
+    "model": "minecraft:husk#main",
+    "texture": "assets/minecraft/textures/entity/zombie/husk.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:husk#main", "minecraft:husk#inner_armor", "minecraft:husk#outer_armor", "minecraft:zombie#main", "minecraft:zombie#inner_armor", "minecraft:zombie#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/zombie/husk.png", "assets/minecraft/textures/entity/zombie/zombie.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:illusioner": {
+    "renderer": "net.minecraft.client.renderer.entity.IllusionerRenderer",
+    "model": "minecraft:illusioner#main",
+    "texture": "assets/minecraft/textures/entity/illager/illusioner.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:illusioner#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/illusioner.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:interaction": {
+    "renderer": "net.minecraft.client.renderer.entity.NoopRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:iron_golem": {
+    "renderer": "net.minecraft.client.renderer.entity.IronGolemRenderer",
+    "model": "minecraft:iron_golem#main",
+    "texture": "assets/minecraft/textures/entity/iron_golem/iron_golem.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:iron_golem#main"],
+    "allTextures": ["assets/minecraft/textures/entity/iron_golem/iron_golem.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:item": {
+    "renderer": "net.minecraft.client.renderer.entity.ItemEntityRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "note": "No entity model. ItemEntityRenderer renders the item's own item/block model (BakedModel) as a billboard/extruded quad. Use the existing block/item model pipeline.",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:item_display": {
+    "renderer": "net.minecraft.client.renderer.entity.DisplayRenderer$ItemDisplayRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:item_frame": {
+    "renderer": "net.minecraft.client.renderer.entity.ItemFrameRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "note": "No entity model. ItemFrameRenderer renders the block models minecraft:block/item_frame and minecraft:block/item_frame_map (present in the client jar under assets/minecraft/models/block/), plus the contained item. Use the block model pipeline.",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:leash_knot": {
+    "renderer": "net.minecraft.client.renderer.entity.LeashKnotRenderer",
+    "model": "minecraft:leash_knot#main",
+    "texture": "assets/minecraft/textures/entity/lead_knot.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:leash_knot#main"],
+    "allTextures": ["assets/minecraft/textures/entity/lead_knot.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:lightning_bolt": {
+    "renderer": "net.minecraft.client.renderer.entity.LightningBoltRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:llama": {
+    "renderer": "net.minecraft.client.renderer.entity.LlamaRenderer",
+    "model": "minecraft:llama#main",
+    "texture": "assets/minecraft/textures/entity/llama/creamy.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:llama#main"],
+    "allTextures": ["assets/minecraft/textures/entity/llama/creamy.png", "assets/minecraft/textures/entity/llama/white.png", "assets/minecraft/textures/entity/llama/brown.png", "assets/minecraft/textures/entity/llama/gray.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:llama_spit": {
+    "renderer": "net.minecraft.client.renderer.entity.LlamaSpitRenderer",
+    "model": "minecraft:llama_spit#main",
+    "texture": "assets/minecraft/textures/entity/llama/spit.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:llama_spit#main"],
+    "allTextures": ["assets/minecraft/textures/entity/llama/spit.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:magma_cube": {
+    "renderer": "net.minecraft.client.renderer.entity.MagmaCubeRenderer",
+    "model": "minecraft:magma_cube#main",
+    "texture": "assets/minecraft/textures/entity/slime/magmacube.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:magma_cube#main"],
+    "allTextures": ["assets/minecraft/textures/entity/slime/magmacube.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:marker": {
+    "renderer": "net.minecraft.client.renderer.entity.NoopRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:mooshroom": {
+    "renderer": "net.minecraft.client.renderer.entity.MushroomCowRenderer",
+    "model": "minecraft:mooshroom#main",
+    "texture": "assets/minecraft/textures/entity/cow/brown_mooshroom.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:mooshroom#main"],
+    "allTextures": ["assets/minecraft/textures/entity/cow/brown_mooshroom.png", "assets/minecraft/textures/entity/cow/red_mooshroom.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:mule": {
+    "renderer": "net.minecraft.client.renderer.entity.ChestedHorseRenderer",
+    "model": "minecraft:mule#main",
+    "texture": "assets/minecraft/textures/entity/horse/mule.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:mule#main"],
+    "allTextures": ["assets/minecraft/textures/entity/horse/donkey.png", "assets/minecraft/textures/entity/horse/mule.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ocelot": {
+    "renderer": "net.minecraft.client.renderer.entity.OcelotRenderer",
+    "model": "minecraft:ocelot#main",
+    "texture": "assets/minecraft/textures/entity/cat/ocelot.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:ocelot#main"],
+    "allTextures": ["assets/minecraft/textures/entity/cat/ocelot.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ominous_item_spawner": {
+    "renderer": "net.minecraft.client.renderer.entity.OminousItemSpawnerRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:painting": {
+    "renderer": "net.minecraft.client.renderer.entity.PaintingRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "note": "No entity model. PaintingRenderer emits a flat WxH quad from the PAINTING_VARIANT registry; see painting-variants.json for every variant's size and texture.",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:panda": {
+    "renderer": "net.minecraft.client.renderer.entity.PandaRenderer",
+    "model": "minecraft:panda#main",
+    "texture": "assets/minecraft/textures/entity/panda/panda.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:panda#main"],
+    "allTextures": ["assets/minecraft/textures/entity/panda/panda.png", "assets/minecraft/textures/entity/panda/lazy_panda.png", "assets/minecraft/textures/entity/panda/worried_panda.png", "assets/minecraft/textures/entity/panda/playful_panda.png", "assets/minecraft/textures/entity/panda/brown_panda.png", "assets/minecraft/textures/entity/panda/weak_panda.png", "assets/minecraft/textures/entity/panda/aggressive_panda.png"],
+    "texturesVerifiedInJars": "7/7",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:parrot": {
+    "renderer": "net.minecraft.client.renderer.entity.ParrotRenderer",
+    "model": "minecraft:parrot#main",
+    "texture": "assets/minecraft/textures/entity/parrot/parrot_red_blue.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:parrot#main"],
+    "allTextures": ["assets/minecraft/textures/entity/parrot/parrot_red_blue.png", "assets/minecraft/textures/entity/parrot/parrot_blue.png", "assets/minecraft/textures/entity/parrot/parrot_green.png", "assets/minecraft/textures/entity/parrot/parrot_yellow_blue.png", "assets/minecraft/textures/entity/parrot/parrot_grey.png"],
+    "texturesVerifiedInJars": "5/5",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:phantom": {
+    "renderer": "net.minecraft.client.renderer.entity.PhantomRenderer",
+    "model": "minecraft:phantom#main",
+    "texture": "assets/minecraft/textures/entity/phantom.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:phantom#main"],
+    "allTextures": ["assets/minecraft/textures/entity/phantom.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:pig": {
+    "renderer": "net.minecraft.client.renderer.entity.PigRenderer",
+    "model": "minecraft:pig#main",
+    "texture": "assets/minecraft/textures/entity/pig/pig.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:pig#main", "minecraft:pig#saddle"],
+    "allTextures": ["assets/minecraft/textures/entity/pig/pig_saddle.png", "assets/minecraft/textures/entity/pig/pig.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:piglin": {
+    "renderer": "net.minecraft.client.renderer.entity.PiglinRenderer",
+    "model": "minecraft:piglin#main",
+    "texture": "assets/minecraft/textures/entity/piglin/piglin.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:piglin#main", "minecraft:piglin#inner_armor", "minecraft:piglin#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/piglin/piglin.png", "assets/minecraft/textures/entity/piglin/zombified_piglin.png", "assets/minecraft/textures/entity/piglin/piglin_brute.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:piglin_brute": {
+    "renderer": "net.minecraft.client.renderer.entity.PiglinRenderer",
+    "model": "minecraft:piglin_brute#main",
+    "texture": "assets/minecraft/textures/entity/piglin/piglin_brute.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:piglin_brute#main", "minecraft:piglin_brute#inner_armor", "minecraft:piglin_brute#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/piglin/piglin.png", "assets/minecraft/textures/entity/piglin/zombified_piglin.png", "assets/minecraft/textures/entity/piglin/piglin_brute.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:pillager": {
+    "renderer": "net.minecraft.client.renderer.entity.PillagerRenderer",
+    "model": "minecraft:pillager#main",
+    "texture": "assets/minecraft/textures/entity/illager/pillager.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:pillager#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/pillager.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:polar_bear": {
+    "renderer": "net.minecraft.client.renderer.entity.PolarBearRenderer",
+    "model": "minecraft:polar_bear#main",
+    "texture": "assets/minecraft/textures/entity/bear/polarbear.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:polar_bear#main"],
+    "allTextures": ["assets/minecraft/textures/entity/bear/polarbear.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:potion": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:pufferfish": {
+    "renderer": "net.minecraft.client.renderer.entity.PufferfishRenderer",
+    "model": "minecraft:pufferfish_big#main",
+    "texture": "assets/minecraft/textures/entity/fish/pufferfish.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:pufferfish_big#main", "minecraft:pufferfish_medium#main", "minecraft:pufferfish_small#main"],
+    "allTextures": ["assets/minecraft/textures/entity/fish/pufferfish.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:rabbit": {
+    "renderer": "net.minecraft.client.renderer.entity.RabbitRenderer",
+    "model": "minecraft:rabbit#main",
+    "texture": "assets/minecraft/textures/entity/rabbit/brown.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:rabbit#main"],
+    "allTextures": ["assets/minecraft/textures/entity/rabbit/brown.png", "assets/minecraft/textures/entity/rabbit/white.png", "assets/minecraft/textures/entity/rabbit/black.png", "assets/minecraft/textures/entity/rabbit/gold.png", "assets/minecraft/textures/entity/rabbit/salt.png", "assets/minecraft/textures/entity/rabbit/white_splotched.png", "assets/minecraft/textures/entity/rabbit/toast.png", "assets/minecraft/textures/entity/rabbit/caerbannog.png"],
+    "texturesVerifiedInJars": "8/8",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:ravager": {
+    "renderer": "net.minecraft.client.renderer.entity.RavagerRenderer",
+    "model": "minecraft:ravager#main",
+    "texture": "assets/minecraft/textures/entity/illager/ravager.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:ravager#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/ravager.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:salmon": {
+    "renderer": "net.minecraft.client.renderer.entity.SalmonRenderer",
+    "model": "minecraft:salmon#main",
+    "texture": "assets/minecraft/textures/entity/fish/salmon.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:salmon#main"],
+    "allTextures": ["assets/minecraft/textures/entity/fish/salmon.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:sheep": {
+    "renderer": "net.minecraft.client.renderer.entity.SheepRenderer",
+    "model": "minecraft:sheep#main",
+    "texture": "assets/minecraft/textures/entity/sheep/sheep.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:sheep#main"],
+    "allTextures": ["assets/minecraft/textures/entity/sheep/sheep.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:shulker": {
+    "renderer": "net.minecraft.client.renderer.entity.ShulkerRenderer",
+    "model": "minecraft:shulker#main",
+    "texture": "assets/minecraft/textures/entity/shulker/shulker.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:shulker#main"],
+    "allTextures": ["assets/minecraft/textures/entity/shulker/shulker.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode + texture by filename heuristic"
+  },
+  "minecraft:shulker_bullet": {
+    "renderer": "net.minecraft.client.renderer.entity.ShulkerBulletRenderer",
+    "model": "minecraft:shulker_bullet#main",
+    "texture": "assets/minecraft/textures/entity/shulker/spark.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:shulker_bullet#main"],
+    "allTextures": ["assets/minecraft/textures/entity/shulker/spark.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:silverfish": {
+    "renderer": "net.minecraft.client.renderer.entity.SilverfishRenderer",
+    "model": "minecraft:silverfish#main",
+    "texture": "assets/minecraft/textures/entity/silverfish.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:silverfish#main"],
+    "allTextures": ["assets/minecraft/textures/entity/silverfish.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:skeleton": {
+    "renderer": "net.minecraft.client.renderer.entity.SkeletonRenderer",
+    "model": "minecraft:skeleton#main",
+    "texture": "assets/minecraft/textures/entity/skeleton/skeleton.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:skeleton#main", "minecraft:skeleton#inner_armor", "minecraft:skeleton#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/skeleton/skeleton.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:skeleton_horse": {
+    "renderer": "net.minecraft.client.renderer.entity.UndeadHorseRenderer",
+    "model": "minecraft:skeleton_horse#main",
+    "texture": "assets/minecraft/textures/entity/horse/horse_zombie.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:skeleton_horse#main"],
+    "allTextures": ["assets/minecraft/textures/entity/horse/horse_zombie.png", "assets/minecraft/textures/entity/horse/horse_skeleton.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:slime": {
+    "renderer": "net.minecraft.client.renderer.entity.SlimeRenderer",
+    "model": "minecraft:slime#main",
+    "texture": "assets/minecraft/textures/entity/slime/slime.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:slime#main"],
+    "allTextures": ["assets/minecraft/textures/entity/slime/slime.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:small_fireball": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:sniffer": {
+    "renderer": "net.minecraft.client.renderer.entity.SnifferRenderer",
+    "model": "minecraft:sniffer#main",
+    "texture": "assets/minecraft/textures/entity/sniffer/sniffer.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:sniffer#main"],
+    "allTextures": ["assets/minecraft/textures/entity/sniffer/sniffer.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:snow_golem": {
+    "renderer": "net.minecraft.client.renderer.entity.SnowGolemRenderer",
+    "model": "minecraft:snow_golem#main",
+    "texture": "assets/minecraft/textures/entity/snow_golem.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:snow_golem#main"],
+    "allTextures": ["assets/minecraft/textures/entity/snow_golem.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:snowball": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownItemRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:spawner_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.MinecartRenderer",
+    "model": "minecraft:spawner_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:spawner_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:spectral_arrow": {
+    "renderer": "net.minecraft.client.renderer.entity.SpectralArrowRenderer",
+    "model": null,
+    "texture": "assets/minecraft/textures/entity/projectiles/spectral_arrow.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/minecraft/textures/entity/projectiles/spectral_arrow.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:spider": {
+    "renderer": "net.minecraft.client.renderer.entity.SpiderRenderer",
+    "model": "minecraft:spider#main",
+    "texture": "assets/minecraft/textures/entity/spider/spider.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:spider#main"],
+    "allTextures": ["assets/minecraft/textures/entity/spider/spider.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:squid": {
+    "renderer": "net.minecraft.client.renderer.entity.SquidRenderer",
+    "model": "minecraft:squid#main",
+    "texture": "assets/minecraft/textures/entity/squid/squid.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:squid#main"],
+    "allTextures": ["assets/minecraft/textures/entity/squid/squid.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:stray": {
+    "renderer": "net.minecraft.client.renderer.entity.StrayRenderer",
+    "model": "minecraft:stray#main",
+    "texture": "assets/minecraft/textures/entity/skeleton/stray.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:stray#main", "minecraft:stray#inner_armor", "minecraft:stray#outer_armor", "minecraft:stray#outer", "minecraft:skeleton#main", "minecraft:skeleton#inner_armor", "minecraft:skeleton#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/skeleton/stray.png", "assets/minecraft/textures/entity/skeleton/stray_overlay.png", "assets/minecraft/textures/entity/skeleton/skeleton.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:strider": {
+    "renderer": "net.minecraft.client.renderer.entity.StriderRenderer",
+    "model": "minecraft:strider#main",
+    "texture": "assets/minecraft/textures/entity/strider/strider.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:strider#main", "minecraft:strider#saddle"],
+    "allTextures": ["assets/minecraft/textures/entity/strider/strider_saddle.png", "assets/minecraft/textures/entity/strider/strider.png", "assets/minecraft/textures/entity/strider/strider_cold.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:tadpole": {
+    "renderer": "net.minecraft.client.renderer.entity.TadpoleRenderer",
+    "model": "minecraft:tadpole#main",
+    "texture": "assets/minecraft/textures/entity/tadpole/tadpole.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:tadpole#main"],
+    "allTextures": ["assets/minecraft/textures/entity/tadpole/tadpole.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:text_display": {
+    "renderer": "net.minecraft.client.renderer.entity.DisplayRenderer$TextDisplayRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:tnt": {
+    "renderer": "net.minecraft.client.renderer.entity.TntRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:tnt_minecart": {
+    "renderer": "net.minecraft.client.renderer.entity.TntMinecartRenderer",
+    "model": "minecraft:tnt_minecart#main",
+    "texture": "assets/minecraft/textures/entity/minecart.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:tnt_minecart#main"],
+    "allTextures": ["assets/minecraft/textures/entity/minecart.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:trader_llama": {
+    "renderer": "net.minecraft.client.renderer.entity.LlamaRenderer",
+    "model": "minecraft:trader_llama#main",
+    "texture": "assets/minecraft/textures/entity/llama/creamy.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:trader_llama#main"],
+    "allTextures": ["assets/minecraft/textures/entity/llama/creamy.png", "assets/minecraft/textures/entity/llama/white.png", "assets/minecraft/textures/entity/llama/brown.png", "assets/minecraft/textures/entity/llama/gray.png"],
+    "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:trident": {
+    "renderer": "net.minecraft.client.renderer.entity.ThrownTridentRenderer",
+    "model": "minecraft:trident#main",
+    "texture": "assets/minecraft/textures/entity/trident.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:trident#main"],
+    "allTextures": ["assets/minecraft/textures/entity/trident.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:tropical_fish": {
+    "renderer": "net.minecraft.client.renderer.entity.TropicalFishRenderer",
+    "model": "minecraft:tropical_fish_small#main",
+    "texture": "assets/minecraft/textures/entity/fish/tropical_a.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:tropical_fish_small#main", "minecraft:tropical_fish_large#main"],
+    "allTextures": ["assets/minecraft/textures/entity/fish/tropical_a.png", "assets/minecraft/textures/entity/fish/tropical_b.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:turtle": {
+    "renderer": "net.minecraft.client.renderer.entity.TurtleRenderer",
+    "model": "minecraft:turtle#main",
+    "texture": "assets/minecraft/textures/entity/turtle/big_sea_turtle.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:turtle#main"],
+    "allTextures": ["assets/minecraft/textures/entity/turtle/big_sea_turtle.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:vex": {
+    "renderer": "net.minecraft.client.renderer.entity.VexRenderer",
+    "model": "minecraft:vex#main",
+    "texture": "assets/minecraft/textures/entity/illager/vex.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:vex#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/vex.png", "assets/minecraft/textures/entity/illager/vex_charging.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:villager": {
+    "renderer": "net.minecraft.client.renderer.entity.VillagerRenderer",
+    "model": "minecraft:villager#main",
+    "texture": "assets/minecraft/textures/entity/villager/villager.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:villager#main"],
+    "allTextures": ["assets/minecraft/textures/entity/villager/villager.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:vindicator": {
+    "renderer": "net.minecraft.client.renderer.entity.VindicatorRenderer",
+    "model": "minecraft:vindicator#main",
+    "texture": "assets/minecraft/textures/entity/illager/vindicator.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:vindicator#main"],
+    "allTextures": ["assets/minecraft/textures/entity/illager/vindicator.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wandering_trader": {
+    "renderer": "net.minecraft.client.renderer.entity.WanderingTraderRenderer",
+    "model": "minecraft:wandering_trader#main",
+    "texture": "assets/minecraft/textures/entity/wandering_trader.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wandering_trader#main"],
+    "allTextures": ["assets/minecraft/textures/entity/wandering_trader.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:warden": {
+    "renderer": "net.minecraft.client.renderer.entity.WardenRenderer",
+    "model": "minecraft:warden#main",
+    "texture": "assets/minecraft/textures/entity/warden/warden.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:warden#main"],
+    "allTextures": ["assets/minecraft/textures/entity/warden/warden.png", "assets/minecraft/textures/entity/warden/warden_bioluminescent_layer.png", "assets/minecraft/textures/entity/warden/warden_heart.png", "assets/minecraft/textures/entity/warden/warden_pulsating_spots_1.png", "assets/minecraft/textures/entity/warden/warden_pulsating_spots_2.png"],
+    "texturesVerifiedInJars": "5/5",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wind_charge": {
+    "renderer": "net.minecraft.client.renderer.entity.WindChargeRenderer",
+    "model": "minecraft:wind_charge#main",
+    "texture": "assets/minecraft/textures/entity/projectiles/wind_charge.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wind_charge#main"],
+    "allTextures": ["assets/minecraft/textures/entity/projectiles/wind_charge.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:witch": {
+    "renderer": "net.minecraft.client.renderer.entity.WitchRenderer",
+    "model": "minecraft:witch#main",
+    "texture": "assets/minecraft/textures/entity/witch.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:witch#main"],
+    "allTextures": ["assets/minecraft/textures/entity/witch.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wither": {
+    "renderer": "net.minecraft.client.renderer.entity.WitherBossRenderer",
+    "model": "minecraft:wither#main",
+    "texture": "assets/minecraft/textures/entity/wither/wither.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wither#main"],
+    "allTextures": ["assets/minecraft/textures/entity/wither/wither_invulnerable.png", "assets/minecraft/textures/entity/wither/wither.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wither_skeleton": {
+    "renderer": "net.minecraft.client.renderer.entity.WitherSkeletonRenderer",
+    "model": "minecraft:wither_skeleton#main",
+    "texture": "assets/minecraft/textures/entity/skeleton/wither_skeleton.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wither_skeleton#main", "minecraft:wither_skeleton#inner_armor", "minecraft:wither_skeleton#outer_armor", "minecraft:skeleton#main", "minecraft:skeleton#inner_armor", "minecraft:skeleton#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/skeleton/wither_skeleton.png", "assets/minecraft/textures/entity/skeleton/skeleton.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wither_skull": {
+    "renderer": "net.minecraft.client.renderer.entity.WitherSkullRenderer",
+    "model": "minecraft:wither_skull#main",
+    "texture": "assets/minecraft/textures/entity/wither/wither_invulnerable.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wither_skull#main"],
+    "allTextures": ["assets/minecraft/textures/entity/wither/wither_invulnerable.png", "assets/minecraft/textures/entity/wither/wither.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:wolf": {
+    "renderer": "net.minecraft.client.renderer.entity.WolfRenderer",
+    "model": "minecraft:wolf#main",
+    "texture": "assets/minecraft/textures/entity/wolf/wolf.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:wolf#main"],
+    "allTextures": ["assets/minecraft/textures/entity/wolf/wolf.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode + texture by filename heuristic"
+  },
+  "minecraft:zoglin": {
+    "renderer": "net.minecraft.client.renderer.entity.ZoglinRenderer",
+    "model": "minecraft:zoglin#main",
+    "texture": "assets/minecraft/textures/entity/hoglin/zoglin.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:zoglin#main"],
+    "allTextures": ["assets/minecraft/textures/entity/hoglin/zoglin.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:zombie": {
+    "renderer": "net.minecraft.client.renderer.entity.ZombieRenderer",
+    "model": "minecraft:zombie#main",
+    "texture": "assets/minecraft/textures/entity/zombie/zombie.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:zombie#main", "minecraft:zombie#inner_armor", "minecraft:zombie#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/zombie/zombie.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:zombie_horse": {
+    "renderer": "net.minecraft.client.renderer.entity.UndeadHorseRenderer",
+    "model": "minecraft:zombie_horse#main",
+    "texture": "assets/minecraft/textures/entity/horse/horse_zombie.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:zombie_horse#main"],
+    "allTextures": ["assets/minecraft/textures/entity/horse/horse_zombie.png", "assets/minecraft/textures/entity/horse/horse_skeleton.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:zombie_villager": {
+    "renderer": "net.minecraft.client.renderer.entity.ZombieVillagerRenderer",
+    "model": "minecraft:zombie_villager#main",
+    "texture": "assets/minecraft/textures/entity/zombie_villager/zombie_villager.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:zombie_villager#main", "minecraft:zombie_villager#inner_armor", "minecraft:zombie_villager#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/zombie_villager/zombie_villager.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "registry+bytecode"
+  },
+  "minecraft:zombified_piglin": {
+    "renderer": "net.minecraft.client.renderer.entity.PiglinRenderer",
+    "model": "minecraft:zombified_piglin#main",
+    "texture": "assets/minecraft/textures/entity/piglin/zombified_piglin.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:zombified_piglin#main", "minecraft:zombified_piglin#inner_armor", "minecraft:zombified_piglin#outer_armor"],
+    "allTextures": ["assets/minecraft/textures/entity/piglin/piglin.png", "assets/minecraft/textures/entity/piglin/zombified_piglin.png", "assets/minecraft/textures/entity/piglin/piglin_brute.png"],
+    "texturesVerifiedInJars": "3/3",
+    "resolvedBy": "registry+bytecode"
+  }
+}

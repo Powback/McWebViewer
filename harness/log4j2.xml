@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Console-only logging for the harness: keeps Minecraft's bootstrap quiet, keeps our own
+  progress lines (System.out gets redirected onto the "STDOUT" logger by Bootstrap), and
+  avoids creating a logs/ directory next to the harness.
+-->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Root level="INFO"><AppenderRef ref="Console"/></Root>
+  </Loggers>
+</Configuration>

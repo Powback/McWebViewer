@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.cache/
+/out/
+# harness/out IS tracked: entity-models.json is the extraction's deliverable and the
+# renderer's input, and regenerating it needs JDK 21, the deobfuscated client jar and the
+# server's mod directory. The glTF is the one exception — 10 MB, marked optional in
+# harness/README.md, used by nothing, and rebuilt from the JSON by one command.
+!harness/out/
+harness/out/entity-models.gltf
+
+*.tmp.mjs
+.env

@@ -1,0 +1,115 @@
+# McWebViewer — static bundle + a read-only view of a world for ?auto=1.
+#
+# Deliberately LAN-only (`.pow`, no Let's Encrypt route). The container serves the
+# vanilla client jar and mod assets to the browser; those are Mojang's and each mod
+# author's files, and Mojang's EULA prohibits redistributing game files. Serving them
+# to yourself on your own LAN is fine — publishing them on `*.powback.com` would not be.
+# If you add a public router, gate it behind Authelia and understand what you are hosting.
+
+services:
+  mcwebviewer:
+    build: .
+    container_name: mcwebviewer
+    restart: unless-stopped
+    environment:
+      # Region files to autoload. Each is up to 1024 chunks; two is plenty to fly around.
+      MCWV_REGIONS: "r.-1.0.mca"
+      # Uncomment to serve only some mod jars. The full set is ~450 MB and the browser
+      # fetches all of it on ?auto=1 — fine on a wired LAN, painful over the VPN.
+      # MCWV_JARS: "create-1.21.1-6.0.10.jar,cc-tweaked-1.21.1-forge-1.119.0.jar"
+    volumes:
+      # ALL READ-ONLY. This is a live server world; nothing here may write to it.
+      - /Users/macback/Projects/minecraft-create121/data/world:/data/world:ro
+      - /Users/macback/Projects/minecraft-create121/data/mods:/data/mods:ro
+      # Vanilla client jar: run `npm run fetch-assets` on the host first.
+      - ./.cache:/data/client:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mcwebviewer.rule=Host(`mcwebviewer.pow`)"
+      - "traefik.http.routers.mcwebviewer.entrypoints=web"
+      - "traefik.http.services.mcwebviewer.loadbalancer.server.port=80"
+    networks:
+      - default
+      - traefik
+
+  # The live tier: a READ-ONLY RCON observer. A browser cannot open a TCP socket, so this
+  # process holds the RCON connection and reports player positions plus "the server has
+  # flushed" over one WebSocket. It is reached at ws://mcwebviewer.pow/live — nginx
+  # proxies it, so there is no second hostname and no second DNS record.
+  #
+  # It has no Traefik router of its own on purpose: this socket can ask a live server to
+  # save, and it should have exactly one way in, behind the viewer it belongs to.
+  mcwv-bridge:
+    build: ./bridge
+    container_name: mcwv-bridge
+    restart: unless-stopped
+    environment:
+      # `mc` is the Minecraft service's name on ITS OWN compose network, which this
+      # container joins below. RCON's port 25575 is NOT published to the host — reaching
+      # it means joining that network, which is a change to THIS container and requires
+      # no restart of, or change to, the Minecraft server.
+      MCWV_RCON_HOST: "${MCWV_RCON_HOST:-mc}"
+      MCWV_RCON_PORT: "${MCWV_RCON_PORT:-25575}"
+      # Set this in a .env file next to this compose file; do NOT commit it.
+      # It is the `rcon.password` from the server's server.properties.
+      MCWV_RCON_PASSWORD: "${MCWV_RCON_PASSWORD:-}"
+
+      # Player position polling. Cheap: `list` plus three `data get`s per tracked player.
+      MCWV_POLL_MS: "${MCWV_POLL_MS:-1000}"
+      MCWV_MAX_PLAYERS: "${MCWV_MAX_PLAYERS:-10}"
+
+      # --- `save-all flush`: THE ONLY WRITE THIS SERVICE MAKES -------------------
+      # Live BLOCK changes (turtles moving, pistons, redstone) need the server to write
+      # changed chunks to disk so the browser can re-read them. That command runs on the
+      # server tick thread, and this server runs a turtle fleet that has already been
+      # destroyed once by a server that could not tick.
+      #
+      # So: OFF unless you set this to 1, and even then the bridge only flushes while a
+      # viewer is actually connected, never faster than every 2 s, and doubles the
+      # interval whenever a flush comes back slow. See bridge/src/flush-timer.mjs.
+      MCWV_FLUSH_ENABLE: "${MCWV_FLUSH_ENABLE:-0}"
+      MCWV_FLUSH_MS: "${MCWV_FLUSH_MS:-5000}"
+      MCWV_FLUSH_SLOW_MS: "${MCWV_FLUSH_SLOW_MS:-1000}"
+
+      # --- browser control (playing, not just watching) -------------------------
+      # Drives a server-side fake player over `/player <name> ...`. That command comes
+      # from a MOD — SiliconeDolls or Carpet: NeoForged on NeoForge 1.21.1 — and is NOT
+      # installed on the reference server.
+      #
+      # Setting this to 1 only permits an ATTEMPT. On startup the bridge runs the spawn
+      # command once and reads the reply; a server without the mod answers "Unknown or
+      # incomplete command", and the bridge then reports the control path as unavailable
+      # and refuses every control message. The browser binds no controls at all in that
+      # case and says why in the HUD — nothing is left firing failing commands at a live
+      # server. See bridge/src/fake-player.mjs.
+      MCWV_FAKEPLAYER_ENABLE: "${MCWV_FAKEPLAYER_ENABLE:-0}"
+      MCWV_BOT_NAME: "${MCWV_BOT_NAME:-WebViewer}"
+      # JSON overriding the command templates, for a mod that spells them differently:
+      #   MCWV_FAKEPLAYER_COMMANDS={"spawn":"dolls spawn {name}"}
+      MCWV_FAKEPLAYER_COMMANDS: "${MCWV_FAKEPLAYER_COMMANDS:-}"
+
+      # Poll tiers. The bot's position drives the camera, so it is polled far faster than
+      # anything else; measured at 10 Hz it is indistinguishable from idle in the server's
+      # tick-time distribution. See bridge/src/observer.mjs for the numbers.
+      MCWV_SELF_MS: "${MCWV_SELF_MS:-100}"
+      MCWV_VITALS_MS: "${MCWV_VITALS_MS:-500}"
+      MCWV_INVENTORY_MS: "${MCWV_INVENTORY_MS:-2000}"
+
+      # RCON has no push channel, so received chat is read from the server's own log.
+      MCWV_CHAT_LOG: "${MCWV_CHAT_LOG:-/data/mclogs/latest.log}"
+    volumes:
+      # READ-ONLY, and the only reason it is here: chat cannot be received over RCON.
+      # Nothing in this project writes to the Minecraft server's directories.
+      - /Users/macback/Projects/minecraft-create121/data/logs:/data/mclogs:ro
+    networks:
+      - default
+      - minecraft
+
+networks:
+  traefik:
+    external: true
+  # The Minecraft server's own compose network. Joining it is how RCON is reached without
+  # publishing port 25575 on the host — nothing about the Minecraft stack changes.
+  minecraft:
+    external: true
+    name: minecraft-create121_default

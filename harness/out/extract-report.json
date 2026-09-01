@@ -1,0 +1,39 @@
+{
+  "jdk": "21.0.12.1",
+  "models": 426,
+  "vanillaLayerRegistry": 213,
+  "factoriesFound": 222,
+  "factoriesInvoked": 213,
+  "perJar": {
+    "client-1.21.1-deobf.jar": {"found": 100, "invoked": 99},
+    "appliedenergistics2-19.2.17.jar": {"found": 2, "invoked": 1},
+    "automobility-0.5.0.h+1.21.1-neoforge.jar": {"found": 2, "invoked": 0},
+    "cccbridge-mc1.21.1-v1.7.3-neoforge.jar": {"found": 1, "invoked": 1},
+    "comforts-neoforge-9.0.5+1.21.1.jar": {"found": 4, "invoked": 4},
+    "create-1.21.1-6.0.10.jar": {"found": 1, "invoked": 0},
+    "create_submarine-2.2.4.jar": {"found": 2, "invoked": 2},
+    "createbigcannons-5.11.7+mc.1.21.1.jar": {"found": 1, "invoked": 0},
+    "createoreexcavation-1.21-1.6.8.jar": {"found": 1, "invoked": 1},
+    "friendsandfoes-neoforge-4.0.27+mc1.21.1.jar": {"found": 8, "invoked": 8},
+    "minecolonies-1.1.1374-1.21.1-snapshot.jar": {"found": 95, "invoked": 94},
+    "railways-0.3.0-beta.2+neoforge-mc1.21.1.jar": {"found": 2, "invoked": 0},
+    "wizards-neoforge-3.0.4+1.21.1.jar": {"found": 3, "invoked": 3}
+  },
+  "neededEntityTypes": ["minecraft:item", "minecraft:item_frame", "minecraft:painting", "minecraft:chicken", "minecraft:chest_minecart", "minecraft:pig", "minecraft:enderman", "minecraft:bee", "minecraft:wolf", "minecraft:skeleton", "minecraft:creeper", "minecraft:horse", "minecraft:sheep", "minecraft:zombie", "minecraft:bat", "minecraft:spider", "minecraft:cow", "corpse:corpse", "minecraft:glow_squid", "minecraft:llama", "minecraft:witch", "friendsandfoes:mauler", "minecraft:squid", "minecraft:cod", "friendsandfoes:rascal", "friendsandfoes:copper_golem", "minecraft:armadillo", "minecraft:donkey", "minecraft:rabbit", "friendsandfoes:moobloom", "minecraft:fox", "minecraft:zombie_villager", "minecraft:drowned", "minecraft:elder_guardian", "friendsandfoes:illusioner", "minecraft:villager", "minecraft:goat"],
+  "neededCount": 37,
+  "covered": ["minecraft:chicken", "minecraft:chest_minecart", "minecraft:pig", "minecraft:enderman", "minecraft:bee", "minecraft:wolf", "minecraft:skeleton", "minecraft:creeper", "minecraft:horse", "minecraft:sheep", "minecraft:zombie", "minecraft:bat", "minecraft:spider", "minecraft:cow", "corpse:corpse", "minecraft:glow_squid", "minecraft:llama", "minecraft:witch", "friendsandfoes:mauler", "minecraft:squid", "minecraft:cod", "friendsandfoes:rascal", "friendsandfoes:copper_golem", "minecraft:armadillo", "minecraft:donkey", "minecraft:rabbit", "friendsandfoes:moobloom", "minecraft:fox", "minecraft:zombie_villager", "minecraft:drowned", "minecraft:elder_guardian", "friendsandfoes:illusioner", "minecraft:villager", "minecraft:goat"],
+  "noLayerDefinitionByDesign": ["minecraft:item", "minecraft:item_frame", "minecraft:painting"],
+  "notCovered": [],
+  "failures": [
+    {"what": "scan createthrusters-bundled-V1.1.3.jar", "reason": "ZipException: zip END header not found"},
+    {"what": "class:net.minecraft.client.model.geom.builders.LayerDefinition#create", "reason": "NullPointerException"},
+    {"what": "class:appeng.core.AppEngClient#lambda$registerEntityLayerDefinitions$8", "reason": "NoClassDefFoundError: net/neoforged/fml/IExtensionPoint"},
+    {"what": "class:io.github.foundationgames.automobility.neoforge.mixin.jsonem.LayerDefinitionAccess#automobility$create", "reason": "AssertionError"},
+    {"what": "class:io.github.foundationgames.automobility.neoforge.vendored.jsonem.serialization.JsonEMCodecs#lambda$static$30", "reason": "ClassCastException: class net.minecraft.client.model.geom.builders.PartDefinition cannot be cast to class io.github.foundationgames.automobility.neoforge.mixin.jsonem.PartDefinitionAccess (net.minecraft.client.model.geom..."},
+    {"what": "class:com.simibubi.create.compat.curios.CuriosRenderers#lambda$onLayerRegister$1", "reason": "NoClassDefFoundError: net/neoforged/neoforge/client/event/EntityRenderersEvent$RegisterLayerDefinitions"},
+    {"what": "class:rbasamoyai.createbigcannons.compat.curios.CBCCuriosRenderers#lambda$onLayerRegister$1", "reason": "NoClassDefFoundError: net/neoforged/bus/api/IEventBus"},
+    {"what": "class:com.minecolonies.core.client.model.MaleDruidModel#createMesh", "reason": "IllegalAccessError: class com.minecolonies.core.client.model.MaleDruidModel tried to access private method 'void net.minecraft.resources.ResourceLocation.<init>(java.lang.String, java.lang.String)' (com.minecolonies.core..."},
+    {"what": "class:com.railwayteam.railways.content.conductor.ConductorCapModel#createBodyLayer", "reason": "NoClassDefFoundError: com/tterrag/registrate/AbstractRegistrate"},
+    {"what": "class:com.railwayteam.railways.content.conductor.ConductorEntityModel#createBodyLayer", "reason": "NoClassDefFoundError: Could not initialize class com.railwayteam.railways.Railways"}
+  ]
+}

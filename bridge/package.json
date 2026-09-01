@@ -1,0 +1,14 @@
+{
+  "name": "mcwv-bridge",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only RCON observer: live player positions and a guarded save-all flush, exposed to the browser over WebSocket.",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

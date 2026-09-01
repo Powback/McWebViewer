@@ -12,6 +12,7 @@
     "audit": "tsx src/tools/audit.ts",
     "fetch-assets": "node scripts/fetch-assets.mjs",
     "render-proof": "tsx src/tools/render-proof.ts",
+    "reveal-proof": "tsx src/tools/reveal-proof.ts",
     "lint": "eslint src scripts bridge/src",
     "test": "tsx --test src/**/*.test.ts && node --test bridge/src/*.test.mjs",
     "build-shaderpack": "tsx src/tools/build-shaderpack.ts",

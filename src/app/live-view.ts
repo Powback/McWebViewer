@@ -130,7 +130,7 @@ export class LiveView {
       camera: deps.viewer.camera,
       world: deps.world,
       send: (msg) => this.client.send(msg),
-      setCutaway: (y) => deps.viewer.setCutawayY(y),
+      setSubject: (pos) => deps.viewer.setSubject(pos),
     });
     // The pad drives the SAME entry points the mouse and keyboard drive, so a phone and a
     // desktop cannot drift apart in what they are able to do.

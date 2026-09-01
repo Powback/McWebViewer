@@ -490,17 +490,32 @@ It is a narrowed perspective camera (26° FOV at ~44 blocks), not an orthographi
 `FlyControls` are all typed on it; swapping the projection would touch all of that to
 change how one mode looks. The field of view is put back exactly on the way out.
 
-**Nothing may hide the character.** From a camera above the subject, every point on the
-line of sight between them is *higher* than the subject — so cutting the world off just
-above its head cannot miss an occluder, and cannot remove anything that was not already in
-the way. That is done with one global clipping plane on the renderer: per fragment, at
-exactly the height asked for, applying to terrain and entities alike with no bookkeeping.
-Hiding whole sections was the alternative and cannot express it — sections are 16 blocks
-tall, so the finest honest cut they allow can leave 15 blocks of ceiling in place.
+**Nothing may hide the character.** Only what is genuinely between the camera and the
+character is faded out, decided per fragment: a fragment goes only if it is *both* inside a
+small disc around the character's screen position *and* nearer to the camera than the
+character is. The disc is specified in blocks at the character's own depth, so the hole
+stays the size of the character at every zoom level, and it fades across a ring with a
+screen-space dither rather than ending at a hard edge.
 
-Measured on the live server with the camera rotated to its most-blocked azimuth (10 solid
-blocks on the sightline): **0 pixels of the character reached the screen with the cutaway
-off, 2601 with it on.**
+**The first version of this cut by HEIGHT and it was wrong.** It clipped the world at
+`playerY + 3` with one global plane. That made the character visible — measured with the
+camera at its most-blocked azimuth, 10 solid blocks on the sightline: **0 pixels of the
+character reached the screen before, 2601 after** — and shipping on that measurement is the
+mistake, because it only asked whether the character came back and never whether anything
+else went away. Two things had:
+
+- A height removes every block above it *everywhere*, occluding or not. You saw through
+  walls that were never in the way and the world read as roofless rather than cut open.
+- The height tracked the player's Y, so a single step up moved the cut for the entire
+  scene. Walls in the distance jumped up and down as you walked, worst on stairs and
+  hillsides.
+
+Neither is fixable by choosing a better height: a height does not know where the camera is,
+and "is this in the way" is a question about the camera. So the question changed rather than
+the number. `src/render/viewer-reveal.test.ts` pins the half that got missed — a 12-block
+wall beside the character stays fully drawn, a roof 20 blocks away keeps its roof, the floor
+underfoot is not punched through, and the same distant wall is checked with the character at
+three different heights and does not change.
 
 `V` toggles the mode as well as the button, because on a desktop the button is unreachable
 exactly when you want it — playing in first person means the canvas holds the pointer lock,

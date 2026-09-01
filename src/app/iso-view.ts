@@ -59,8 +59,6 @@ const JUMP_EVERY_MS = 600;
 const GIVE_UP_MS = 4000;
 /** Camera-to-ground can be 160 blocks plus the terrain behind it. */
 const PICK_RANGE = 400;
-/** Blocks of clearance left above the character's feet by the cutaway. */
-const CUT_HEADROOM = 3;
 
 /** A press this short that travelled this little was a tap, not a pan. */
 const TAP_SLOP_PX = 10;
@@ -72,15 +70,21 @@ export interface IsoViewDeps {
   world: VoxelSource;
   send: (msg: ControlIntent) => void;
   /**
-   * Apply or clear the cutaway plane. Null means "draw everything".
+   * Name the subject that must stay visible, or null to draw everything untouched.
    *
-   * THIS IS THE REQUIREMENT THAT MAKES THE MODE USABLE: from a camera above the player,
-   * every possible occluder is on the line of sight between them, and that line only ever
-   * goes UP. So clipping the world above the character's head cannot hide anything that
-   * was not already in the way, and cannot fail to hide something that was. A roof, a
-   * hillside or an overhang is cut open exactly as far as it needs to be.
+   * THIS IS THE REQUIREMENT THAT MAKES THE MODE USABLE — you must be able to see the thing
+   * you are driving. The renderer answers it per fragment: what is inside a small disc
+   * around the subject on screen AND nearer to the camera than the subject is, is faded
+   * out; everything else is drawn exactly as it always was.
+   *
+   * It used to be a cutaway HEIGHT, `playerY + 3`, and that was wrong twice over. A height
+   * has no idea where the camera is, so it removed every block above it anywhere in the
+   * world — you saw through walls that were never in the way and the world looked
+   * roofless. And it tracked the player's Y, so one step up moved the cut for the entire
+   * scene and distant walls jumped up and down as you walked. Neither symptom is fixable
+   * by choosing a better height; the question was wrong.
    */
-  setCutaway: (y: number | null) => void;
+  setSubject: (pos: readonly [number, number, number] | null) => void;
 }
 
 interface Point { x: number; y: number }
@@ -130,7 +134,7 @@ export class IsoView {
     this.bindTouch();
   }
 
-  /** Puts back everything `bind` changed, including the field of view and the cutaway. */
+  /** Puts back everything `bind` changed, including the field of view and the reveal. */
   unbind(): void {
     if (!this.bound) return;
     for (const off of this.detach) off();
@@ -145,22 +149,21 @@ export class IsoView {
       this.deps.camera.fov = this.savedFov;
       this.deps.camera.updateProjectionMatrix();
     }
-    this.deps.setCutaway(null);
+    this.deps.setSubject(null);
   }
 
   /**
-   * One frame: put the camera where it belongs, open up whatever is on top of the
-   * character, and take one step of the walk it was told to make.
+   * One frame: put the camera where it belongs, tell the renderer what must stay visible,
+   * and take one step of the walk it was told to make.
+   *
+   * ORDER MATTERS. The camera is placed first because the reveal projects the subject
+   * through it, and projecting through last frame's camera puts the hole where the
+   * character was, not where it is — which is exactly the popping this replaced.
    */
   update(pos: readonly [number, number, number], now = performance.now()): void {
     this.place(pos);
-    this.deps.setCutaway(this.cutY(pos));
+    this.deps.setSubject(pos);
     this.steer(pos, now);
-  }
-
-  /** The height the world is cut off at — just above the character's head. */
-  cutY(pos: readonly [number, number, number]): number {
-    return Math.floor(pos[1]) + CUT_HEADROOM;
   }
 
   // -------------------------------------------------------------------------

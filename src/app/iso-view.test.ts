@@ -10,8 +10,12 @@
  * ends is a bot shoving into a wall forever, and nothing on screen distinguishes that from
  * a crash.
  *
- * The second is the CUTAWAY, which is the requirement that makes the mode usable at all:
- * the character must never be hidden by the terrain on top of it.
+ * The second is the REVEAL, which is the requirement that makes the mode usable at all:
+ * the character must never be hidden by whatever is between it and the camera. What that
+ * costs — how the hole is placed and sized, and what it must NOT touch — is pinned in
+ * viewer-reveal.test.ts, because it is the renderer that answers it. What is pinned here
+ * is that this view asks the question, asks it about the right point, and stops asking on
+ * the way out.
  */
 
 import { test } from 'node:test';
@@ -29,7 +33,7 @@ const flatWorld: VoxelSource = { getState: (_x, y) => (y < GROUND_Y ? 1 : 0) };
 interface Harness {
   iso: IsoView;
   sent: ControlIntent[];
-  cut: Array<number | null>;
+  subject: Array<readonly [number, number, number] | null>;
   camera: PerspectiveCamera;
   canvas: EventTarget & { clientWidth: number; clientHeight: number };
   touch: (type: string, points: Array<{ identifier: number; clientX: number; clientY: number }>) => void;
@@ -42,18 +46,18 @@ function harness(world: VoxelSource = flatWorld): Harness {
 
   const camera = new PerspectiveCamera(70, 800 / 600, 0.1, 2000);
   const sent: ControlIntent[] = [];
-  const cut: Array<number | null> = [];
+  const subject: Array<readonly [number, number, number] | null> = [];
   const iso = new IsoView({
     canvas: canvas as unknown as HTMLCanvasElement,
     camera,
     world,
     send: (m) => sent.push(m),
-    setCutaway: (y) => cut.push(y),
+    setSubject: (pos) => subject.push(pos),
   });
   const touch = (type: string, points: Array<{ identifier: number; clientX: number; clientY: number }>) => {
     canvas.dispatchEvent(Object.assign(new Event(type), { changedTouches: points }));
   };
-  return { iso, sent, cut, camera, canvas, touch };
+  return { iso, sent, subject, camera, canvas, touch };
 }
 
 const at = (x: number, z: number): [number, number, number] => [x, GROUND_Y, z];
@@ -81,8 +85,8 @@ test('the camera sits above and behind the character and looks down at it', () =
   assert.ok(camera.fov < 40, 'a 70 degree view has far too much perspective to read as iso');
 });
 
-test('leaving the mode puts back the field of view and the cutaway it changed', () => {
-  const { iso, camera, cut } = harness();
+test('leaving the mode puts back the field of view and the reveal it asked for', () => {
+  const { iso, camera, subject } = harness();
   const before = camera.fov;
   iso.bind();
   iso.update(at(0, 0));
@@ -91,48 +95,65 @@ test('leaving the mode puts back the field of view and the cutaway it changed', 
   iso.unbind();
 
   assert.equal(camera.fov, before, 'first person must not inherit the isometric lens');
-  assert.equal(cut.at(-1), null, 'and must not inherit a world cut off above your head');
+  assert.equal(subject.at(-1), null, 'and must not inherit a hole cut in the world');
 });
 
 // ---------------------------------------------------------------------------
-// The cutaway — "free whatever is occluding the player"
+// The reveal — "see the thing you are driving"
 
-test('the world is cut off just above the character, never below it', () => {
-  const { iso, cut } = harness();
+test('the subject named to the renderer is the character, every frame', () => {
+  const { iso, subject } = harness();
   iso.bind();
 
   iso.update([10, 71.8, 20]);
 
-  const y = cut.at(-1) as number;
-  // Above the head (a player is 1.8 blocks tall) so the model is never clipped...
-  assert.ok(y >= 71.8 + 1.5, `cut at ${y} would slice the character itself`);
-  // ...and low enough that a ceiling one block over it is opened up rather than left.
-  assert.ok(y <= 71.8 + 4, `cut at ${y} leaves too much roof on top of the character`);
+  assert.deepEqual(subject.at(-1), [10, 71.8, 20]);
 });
 
 /**
- * Why a plane above the head is sufficient, stated as a test rather than a comment: from a
- * camera placed above the subject, every point on the line of sight between them is HIGHER
- * than the subject. So an occluder is by definition above it, and cutting above the head
- * cannot miss one.
+ * THE BUG THE OLD MODEL HAD. The reveal used to be a clipping plane at `playerY + 3`, so
+ * the number handed to the renderer changed every time the character stepped up or down —
+ * and that number governed the WHOLE SCENE, which is why walls in the distance jumped up
+ * and down as you walked. What is handed over now is a position, and a position going up
+ * by one block cannot mean anything to geometry that is nowhere near it. Pinned as the
+ * absence of a height: there is no longer a scene-wide number to move.
  */
-test('everything between the camera and the character is above the cut', () => {
-  const { iso, camera, cut } = harness();
+test('walking up a step changes the subject and nothing else', () => {
+  const { iso, subject } = harness();
   iso.bind();
-  const player = at(100, 200);
-  iso.update(player);
-  const y = cut.at(-1) as number;
 
-  const eye = [player[0], player[1] + 1.6, player[2]];
-  for (let t = 0.05; t <= 1; t += 0.05) {
-    const py = eye[1] + (camera.position.y - eye[1]) * t;
-    if (py <= y) continue;
-    // Past the cut height the ray is in cut-away air for the rest of its length: the
-    // camera only ever gets higher, so nothing can occlude from here on.
-    assert.ok(camera.position.y > y, 'the camera itself must be above the cut');
-    break;
-  }
-  assert.ok(camera.position.y > y);
+  iso.update([10, 64, 20]);
+  iso.update([10, 65, 20]);
+
+  const [low, high] = subject.slice(-2) as Array<readonly [number, number, number]>;
+  assert.deepEqual([low[0], low[2]], [high[0], high[2]]);
+  assert.equal(high[1] - low[1], 1, 'the only thing that moved is the character itself');
+});
+
+/**
+ * The camera is placed BEFORE the subject is announced, because the renderer projects that
+ * point through the camera to find it on screen. Announcing first would place the hole
+ * through last frame's camera — the character would sit outside its own reveal whenever
+ * the view was moving, which is precisely the popping this replaced.
+ */
+test('the camera is placed before the subject is announced', () => {
+  const canvas = Object.assign(new EventTarget(), { clientWidth: 800, clientHeight: 600 });
+  (globalThis as Record<string, unknown>).window = new EventTarget();
+  (globalThis as Record<string, unknown>).document = new EventTarget();
+  const camera = new PerspectiveCamera(70, 800 / 600, 0.1, 2000);
+  const seen: Array<number> = [];
+  const iso = new IsoView({
+    canvas: canvas as unknown as HTMLCanvasElement,
+    camera,
+    world: flatWorld,
+    send: () => {},
+    setSubject: () => seen.push(camera.position.y),
+  });
+  iso.bind();
+
+  iso.update(at(100, 200));
+
+  assert.ok(seen[0] > GROUND_Y + 10, 'the camera was still at its old place when asked');
 });
 
 // ---------------------------------------------------------------------------

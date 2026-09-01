@@ -21,6 +21,9 @@ export interface ViewerStats {
   fps: number;
 }
 
+/** Shared so that turning the cutaway off does not allocate a new array every frame. */
+const EMPTY_PLANES: THREE.Plane[] = [];
+
 export class Viewer {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
@@ -31,6 +34,14 @@ export class Viewer {
 
   quads = 0;
   private frameTimes: number[] = [];
+  /**
+   * The isometric mode's cutaway. Kept as one long-lived plane in one long-lived array:
+   * three.js compiles clipping into the shader from `clippingPlanes.length`, so swapping
+   * the array's identity every frame is free but changing its LENGTH recompiles every
+   * material. Mutating the constant does not.
+   */
+  private cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+  private cutPlanes = [this.cutPlane];
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -146,6 +157,43 @@ export class Viewer {
       created.push(m);
     }
     this.meshes.set(key, created);
+  }
+
+  /**
+   * Move an entity mesh already in the scene, without rebuilding it.
+   *
+   * `addEntityMesh` disposes and re-uploads every buffer, which is right once per roster
+   * poll and ruinous once per frame. The isometric view needs the character it is
+   * following to move at frame rate rather than in 1 Hz steps, and a transform is the only
+   * thing that changes between those steps.
+   */
+  setEntityTransform(key: string, pos: readonly [number, number, number], angleDeg?: number) {
+    const meshes = this.meshes.get(key);
+    if (!meshes) return;
+    for (const m of meshes) {
+      m.position.set(pos[0], pos[1], pos[2]);
+      if (angleDeg !== undefined) m.rotation.y = (angleDeg * Math.PI) / 180;
+    }
+  }
+
+  /**
+   * Cut the world off above `y`, or `null` to draw all of it.
+   *
+   * A global clipping plane rather than hiding sections: sections are 16 blocks tall, so
+   * the coarsest honest cut they can express leaves up to 15 blocks of ceiling still on
+   * top of the player. This clips per fragment, at exactly the height asked for, on the
+   * GPU, and costs one plane test — and because it is set on the renderer rather than on
+   * each material, it applies to terrain and entities alike with no bookkeeping.
+   */
+  setCutawayY(y: number | null) {
+    if (y === null) {
+      this.renderer.clippingPlanes = EMPTY_PLANES;
+      return;
+    }
+    // Plane(normal, constant) keeps points where normal·p + constant >= 0. With normal
+    // -Y that is `-p.y + y >= 0`, i.e. everything at or below `y` survives.
+    this.cutPlane.constant = y;
+    this.renderer.clippingPlanes = this.cutPlanes;
   }
 
   removeSection(key: string) {

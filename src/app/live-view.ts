@@ -29,6 +29,7 @@ import {
 } from './region-sync.js';
 import { ObserverClient, describeControl, describeFlush, type ControlState, type LivePlayer, type SelfSample } from './live.js';
 import { LiveControls } from './live-controls.js';
+import { IsoView, type CameraMode } from './iso-view.js';
 import { TouchPad } from './touch-pad.js';
 import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
@@ -66,9 +67,18 @@ export interface LiveViewDeps {
 export class LiveView {
   readonly client: ObserverClient;
   readonly controls: LiveControls;
+  readonly iso: IsoView;
   readonly pad: TouchPad;
   readonly hud: PlayHud;
   private watcher: RegionWatcher;
+  /**
+   * Which camera owns the screen. First person is the default because it is what "join a
+   * server and play" means; the isometric view is a mode you ask for, from a button.
+   */
+  private mode: CameraMode = 'first';
+  /** The scene key of the character being driven, while it is being drawn. */
+  private selfKey: string | null = null;
+  private selfYawDeg = 0;
   private icons: ItemIcons | null = null;
   private typing = false;
   private dirty = new Set<string>();
@@ -115,6 +125,13 @@ export class LiveView {
       onChat: () => this.hud.openChat(),
       onUseBlock: (pos) => this.client.send({ t: 'openBlock', x: pos[0], y: pos[1], z: pos[2] }),
     });
+    this.iso = new IsoView({
+      canvas: deps.viewer.renderer.domElement,
+      camera: deps.viewer.camera,
+      world: deps.world,
+      send: (msg) => this.client.send(msg),
+      setCutaway: (y) => deps.viewer.setCutawayY(y),
+    });
     // The pad drives the SAME entry points the mouse and keyboard drive, so a phone and a
     // desktop cannot drift apart in what they are able to do.
     this.pad = new TouchPad({
@@ -124,6 +141,57 @@ export class LiveView {
       onJump: () => this.controls.touchJump(),
       onInventory: () => this.hud.toggleInventory(),
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Camera mode
+
+  get cameraMode(): CameraMode {
+    return this.mode;
+  }
+
+  toggleCameraMode(): CameraMode {
+    this.setCameraMode(this.mode === 'iso' ? 'first' : 'iso');
+    return this.mode;
+  }
+
+  /**
+   * Switch camera modes.
+   *
+   * The two input paths are mutually exclusive on purpose: first person binds mouselook,
+   * WASD and a dig on the left button, and the isometric view binds a drag that pans and a
+   * tap that walks. Leaving both bound would make a tap on the ground both a destination
+   * and a dig, and a pan both a camera move and a turn.
+   */
+  setCameraMode(mode: CameraMode): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    // Whatever the old mode had the character doing, it is not doing any more.
+    this.controls.releaseAll();
+    this.pad.release();
+    this.applyInputMode();
+  }
+
+  /** Bind exactly the one input path the current mode and control state call for. */
+  private applyInputMode(): void {
+    const joined = this.client.control?.joined === true;
+    if (!joined) {
+      this.controls.unbind();
+      this.iso.unbind();
+      this.pad.setVisible(false);
+      return;
+    }
+    if (this.mode === 'iso') {
+      this.controls.unbind();
+      this.iso.bind();
+    } else {
+      this.iso.unbind();
+      this.controls.bind();
+    }
+    this.pad.setVisible(true);
+    // The crosshair is what MINE and PLACE aim with, and only first person aims that way;
+    // the isometric view aims by tapping the ground.
+    this.pad.setCrosshair(this.mode === 'first');
   }
 
   /**
@@ -144,13 +212,12 @@ export class LiveView {
    * than accepting WASD and quietly dropping it, which is what the previous version did.
    */
   private onControl(control: ControlState): void {
-    if (control.joined) this.controls.bind();
-    else this.controls.unbind();
-    // The pad is only ever shown over controls that are actually bound: a MINE button on
-    // a page that cannot mine is the same lie as controls that accept input and drop it.
-    this.pad.setVisible(control.joined === true);
+    this.applyInputMode();
     this.hud.setVisible(control.joined === true);
-    if (!control.joined) this.smoothed = null;
+    if (!control.joined) {
+      this.smoothed = null;
+      this.selfKey = null;
+    }
     this.onControlChange?.(control);
   }
 
@@ -268,15 +335,21 @@ export class LiveView {
     const mesh = this.ensurePlayerMesh();
     const alive = new Set<string>();
     this.followBot(list);
+    this.selfKey = null;
     for (const p of list) {
       if (p.dimension !== null && p.dimension !== DRAWN_DIMENSION) continue;
-      // NEVER draw the player you ARE. The camera sits at that bot's eye height, inside
-      // its head, so drawing it puts the inside of a Steve skull across the view. A real
-      // client does the same: your own model is drawn in third person and skipped in
-      // first, and this camera is always first.
-      if (this.controls.active && this.isBot(p.name)) continue;
+      // NEVER draw the player you ARE — in FIRST PERSON. The camera sits at that bot's eye
+      // height, inside its head, so drawing it puts the inside of a Steve skull across the
+      // view. A real client does the same: your own model is drawn in third person and
+      // skipped in first. The isometric camera is third person, and the character is the
+      // entire subject of that mode, so there it MUST be drawn.
+      if (this.hidesSelf(p.name)) continue;
       const key = `player:${p.name}`;
       alive.add(key);
+      if (this.isBot(p.name)) {
+        this.selfKey = key;
+        this.selfYawDeg = entityYawDeg(p.yaw);
+      }
       if (!mesh) continue;
       this.deps.viewer.addEntityMesh(key, mesh.layers, {
         pos: p.pos,
@@ -321,6 +394,11 @@ export class LiveView {
     return !!bot && name.toLowerCase() === bot;
   }
 
+  /** Only first person hides your own body; every other camera is looking at it. */
+  private hidesSelf(name: string): boolean {
+    return this.mode === 'first' && this.controls.active && this.isBot(name);
+  }
+
   /** Built once. `undefined` means "not tried yet"; `null` means "tried, no geometry". */
   private ensurePlayerMesh(): EntityMesh | null {
     if (this.playerMesh !== undefined) return this.playerMesh;
@@ -350,8 +428,9 @@ export class LiveView {
     // guarantee, and the cost of guessing wrong is a player with no mine button.
     if (this.controls.diag.touches > 0 && this.controls.active && !this.pad.visible) {
       this.pad.setVisible(true, true);
+      this.pad.setCrosshair(this.mode === 'first');
     }
-    if (!this.controls.active) return false;
+    if (!this.controls.active && !this.iso.active) return false;
     // Owed look intents go out here rather than from the input handlers, so the last
     // fraction of a gesture is not lost to the throttle. Cheap and idempotent.
     this.controls.flushLook();
@@ -367,8 +446,23 @@ export class LiveView {
     ];
     const k = 1 - Math.exp(-CONVERGE_RATE * dt);
     for (let i = 0; i < 3; i++) this.smoothed[i] += (target[i] - this.smoothed[i]) * k;
-    this.controls.setCameraTo(this.smoothed);
+    if (this.iso.active) this.frameIso(this.smoothed);
+    else this.controls.setCameraTo(this.smoothed);
     return true;
+  }
+
+  /**
+   * One isometric frame.
+   *
+   * The character's mesh is moved here rather than left where the 1 Hz roster poll put it:
+   * in first person nobody sees their own body, but this mode is entirely about watching
+   * it, and a subject that teleports once a second is the most visible thing on screen.
+   * The same smoothed position that drives the camera drives the model, so they cannot
+   * disagree.
+   */
+  private frameIso(pos: [number, number, number]): void {
+    if (this.selfKey) this.deps.viewer.setEntityTransform(this.selfKey, pos, this.selfYawDeg);
+    this.iso.update(pos);
   }
 
   hudLine(): string {
@@ -414,7 +508,8 @@ export class LiveView {
       ? `${c.lastAck.of} ${((performance.now() - c.lastAck.at) / 1000).toFixed(1)}s`
         + (c.lastAck.driving ? ' driving' : ' IDLE')
       : 'none';
-    return `input: pad=${yn(this.pad.visible)}`
+    return `input: mode=${this.mode}${this.iso.active ? '(bound)' : ''}`
+      + ` pad=${yn(this.pad.visible)}`
       + ` bound=${yn(this.controls.active)} lock=${yn(this.controls.pointerLocked)}`
       + ` fine=${yn(this.controls.pointerFine)} touch=${d.touches}`
       + ` keys=${this.controls.heldNames.join(',') || '-'}`

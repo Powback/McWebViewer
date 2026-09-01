@@ -41,6 +41,50 @@ const joinButton = new JoinButton({
   onLeave: () => live?.leave(),
 });
 
+/**
+ * The camera-mode toggle.
+ *
+ * Deliberately a BUTTON and not a URL flag: it is a way to look at the world, not a
+ * deployment choice, and a flag would mean reloading the page — which on this app means
+ * re-fetching the bake, re-meshing a region and re-joining the server — to change your
+ * mind about a camera angle.
+ *
+ * Only shown while a character is actually being driven. There is nothing for an
+ * isometric camera to centre on otherwise, and a button that frames empty air is the same
+ * kind of lie as controls that accept input and drop it.
+ */
+const modeButton = document.getElementById('mode') as HTMLButtonElement;
+modeButton.addEventListener('click', () => toggleCamera());
+
+/**
+ * V also toggles it, because on a desktop THE BUTTON IS UNREACHABLE EXACTLY WHEN YOU WANT
+ * IT. Playing in first person means the canvas holds the pointer lock, and a locked
+ * pointer is captured by the canvas — measured here: with the lock held, a click on this
+ * button never reaches it. You would have to press Escape, leave the game, then click. A
+ * key is delivered either way.
+ *
+ * Bound on the window rather than inside LiveControls because LiveControls is UNBOUND in
+ * isometric mode, and a shortcut that only works in one direction is worse than none.
+ */
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyV' || e.repeat) return;
+  if (live?.hud.typing) return;   // "v" belongs to the chat box while it is open
+  toggleCamera();
+});
+
+function toggleCamera() {
+  live?.toggleCameraMode();
+  renderModeButton();
+}
+
+function renderModeButton() {
+  const joined = live?.client.control?.joined === true;
+  modeButton.hidden = !joined;
+  const iso = live?.cameraMode === 'iso';
+  modeButton.textContent = iso ? 'First person' : 'Isometric';
+  modeButton.classList.toggle('iso', iso);
+}
+
 function status(msg: string) {
   console.log('[mcwv]', msg);
   log.textContent = msg;
@@ -634,6 +678,7 @@ async function startObserving(url: string) {
   });
   live.onControlChange = (control) => {
     joinButton.render(control, true);
+    renderModeButton();
   };
   await live.start();
   (globalThis as Record<string, unknown>).__mcwvLive = live;

@@ -19,24 +19,26 @@
       #hud { top: 8px; }
       #log { bottom: 8px; color: #9fe; }
 
-      /* Join / Leave, top right. Hidden entirely outside live mode — a button that
-         cannot do anything is worse than no button, which is the whole lesson of this
-         feature. */
+      /* Join / Leave and the camera-mode toggle, in one top-right cluster. Hidden
+         entirely outside live mode — a button that cannot do anything is worse than no
+         button, which is the whole lesson of this feature. */
       #topright {
         position: fixed; top: 8px; right: 8px; z-index: 2;
         display: flex; gap: 6px; align-items: flex-start;
         margin-top: env(safe-area-inset-top);
       }
-      #join {
+      #join, #mode {
         font: 600 13px/1 ui-monospace, Menlo, monospace;
         padding: 10px 16px; border: 0; border-radius: 8px;
         background: #2d5cff; color: #fff; cursor: pointer;
         /* Big enough to hit with a thumb, and clear of the notch on a phone. */
         min-height: 40px;
       }
-      #join[hidden] { display: none; }
+      #join[hidden], #mode[hidden] { display: none; }
       #join:disabled { background: #33333d; color: #8a8a94; cursor: not-allowed; }
       #join.leave { background: #b3402f; }
+      #mode { background: #3a3a48; }
+      #mode.iso { background: #1f7a5a; }
       /* The reason a disabled button is disabled, said out loud rather than in a tooltip
          nobody can open on a phone. */
       #join-why {
@@ -176,6 +178,7 @@
     <canvas id="view"></canvas>
     <div id="hud">initialising</div>
     <div id="topright">
+      <button id="mode" hidden type="button">Isometric</button>
       <button id="join" hidden>Join</button>
     </div>
     <div id="join-why" hidden></div>

@@ -71,6 +71,10 @@ Stated plainly; see ARCHITECTURE.md §6.
 - **Live mode sees blocks, not entities.** Mobs and items are read from the save files at
   load and are not refreshed; a turtle moving shows up (it is a block), a cow walking does
   not. Live *players* come from RCON and do update.
+- **Click-to-move in isometric mode is steering, not pathfinding.** The bridge's command
+  set has no goto in it, so the character faces the point and holds forward. It jumps at a
+  step it cannot walk over and gives up after four seconds of no progress, but it will not
+  walk around a tree. See [Isometric mode](#isometric-mode).
 - **Playing from the browser is off by default** and needs a server-side mod
   (SiliconeDolls). It is installed on the reference server, so the Join button works
   there; on a server without it, the button stays disabled and says why rather than
@@ -140,6 +144,10 @@ speed, `Ctrl` to sprint.
 Controls, touch: drag on the **right** half of the screen to look, drag on the **left** half
 as a virtual stick to move. There is no separate up/down control — movement follows the
 camera, so look up and push forward to climb.
+
+While *playing* (not just flying), touch also gets an on-screen pad — MINE (press and
+hold), PLACE, JUMP, INV — and `V` or the **Isometric** button switches to the top-down RTS
+camera. See [Playing on a phone](#playing-on-a-phone) and [Isometric mode](#isometric-mode).
 
 ### Shaderpacks
 
@@ -347,7 +355,7 @@ walked off on an unrelated heading even with the conversion right.
 Live mode prints an input diagnostic in the HUD, always on:
 
 ```
-input: bound=yes lock=yes fine=yes touch=0 keys=forward raw=14 try=9 sent=9 drop=0 ack=input 0.2s driving
+input: mode=first pad=no bound=yes lock=yes fine=yes touch=0 keys=forward raw=14 try=9 sent=9 drop=0 ack=input 0.2s driving
 ```
 
 Every layer a keystroke has to survive, counted separately, because they all fail the same
@@ -355,6 +363,8 @@ silent way and the only thing that tells them apart is which counter stopped mov
 
 | field | what a bad value means |
 |---|---|
+| `mode` | which camera owns the screen, `first` or `iso`; `iso(bound)` means the isometric input path is attached |
+| `pad` | whether the on-screen action pad is up — `no` on a phone means MINE, PLACE and JUMP have no button |
 | `bound` | `no` — Join has not succeeded; there are no listeners at all |
 | `lock` | `no` — no pointer lock; drag-to-look is in use (still playable) |
 | `fine` | `no` — a touch device, so `raw=0` is expected, not a fault |
@@ -432,6 +442,70 @@ anywhere and only the RCON socket left in the container.
 
 The bridge now pings every viewer every 30 s and drops any that misses two rounds.
 
+#### Playing on a phone
+
+The Join button has always been sized for a thumb, and the fly camera has always had touch
+controls — but the *playing* controls did not. Pointer lock does not exist on touch and
+there is no keyboard, so every control the play path bound was one a phone cannot produce:
+tapping Join gave a HUD and a view that no gesture could move or turn.
+
+Touch now uses the same layout as the fly camera, so the gesture you learn watching still
+works playing: **left half is a movement stick, right half is a look drag.** The stick
+resolves to one direction past a dead zone rather than a blend, because `move forward` and
+`move left` are separate stateful commands on the server and only one can run at a time.
+
+**Jump, mine and place needed buttons.** The stick and the look drag covered walking and
+turning, and every remaining verb was still bound to `Space`, the left mouse button and the
+right mouse button — none of which a phone can produce. Driven on an emulated iPhone
+against the live bridge, a tap, a 1.2 s hold and a two-finger tap each put **zero** intents
+on the wire, while the same session's stick and look drag produced `input` and `look`
+normally. The gestures were not subtly wrong; the verbs were never bound.
+
+So there is now an on-screen pad — MINE, PLACE, JUMP, INV — bottom-right, where a right
+thumb reaches without fighting the stick (left half), the hotbar (bottom centre) or chat
+(bottom left). It appears only on a device that needs it: `(pointer: coarse)` or a non-zero
+`maxTouchPoints`, plus a fallback that reveals it the moment a real touch lands, because
+that media query is a good guess and not a guarantee.
+
+**MINE is a hold, not a tap.** Minecraft breaks blocks over time and the *server* owns that
+timer, so the button reports its edges and nothing else; a tap handler would send both
+inside one frame and never break anything harder than a torch. Its release is bound on the
+window rather than on the button, because a finger that slides off before lifting delivers
+its `touchend` somewhere else entirely. A crosshair marks what MINE and PLACE are aiming
+at — without one, "mining does not work" is usually "mining works and you were aiming at
+the sky".
+
+A phone also gets no `mouseup` and no `pointerlockchange`, which were the only two things
+that used to stop a dig. Backgrounding the tab or locking the screen mid-hold now releases
+it too; otherwise the bot mines until somebody notices.
+
+#### Isometric mode
+
+An alternative camera, toggled with the **Isometric** button (or `V`), for looking at your
+character rather than out of its eyes: fixed 35.3° pitch and 45° azimuth, tap the ground to
+walk there, drag to pan, pinch or scroll to zoom.
+
+It is a narrowed perspective camera (26° FOV at ~44 blocks), not an orthographic one.
+`Viewer` owns a single `PerspectiveCamera` and the meshing queue, the shaderpack path and
+`FlyControls` are all typed on it; swapping the projection would touch all of that to
+change how one mode looks. The field of view is put back exactly on the way out.
+
+**Nothing may hide the character.** From a camera above the subject, every point on the
+line of sight between them is *higher* than the subject — so cutting the world off just
+above its head cannot miss an occluder, and cannot remove anything that was not already in
+the way. That is done with one global clipping plane on the renderer: per fragment, at
+exactly the height asked for, applying to terrain and entities alike with no bookkeeping.
+Hiding whole sections was the alternative and cannot express it — sections are 16 blocks
+tall, so the finest honest cut they allow can leave 15 blocks of ceiling in place.
+
+Measured on the live server with the camera rotated to its most-blocked azimuth (10 solid
+blocks on the sightline): **0 pixels of the character reached the screen with the cutaway
+off, 2601 with it on.**
+
+`V` toggles the mode as well as the button, because on a desktop the button is unreachable
+exactly when you want it — playing in first person means the canvas holds the pointer lock,
+and a locked pointer is captured by the canvas, so a click on the button never arrives.
+
 #### Nothing here requires pointer lock
 
 Mining and placing used to be gated on it, which silently removed both on any browser that
@@ -468,8 +542,8 @@ packets on the wire at once. There is a test that fails if that regresses.
 |---|---|---|
 | move / jump / sneak / sprint | `player X move …`, sent on intent CHANGE | yes |
 | look | tracked model + relative `turn` deltas | yes |
-| **break blocks** | hold left mouse -> `attack continue`; the SERVER owns the timing (hardness, tool, haste) | yes — placed a block and mined it back out |
-| **place / use** | right mouse -> `use once`; doors, buttons, levers, chests, eating all the same verb | yes — inventory 64 -> 63 |
+| **break blocks** | hold left mouse, or hold **MINE** on the touch pad -> `attack continue`; the SERVER owns the timing (hardness, tool, haste) | yes — placed a block and mined it back out |
+| **place / use** | right mouse, or **PLACE** on the touch pad -> `use once`; doors, buttons, levers, chests, eating all the same verb | yes — inventory 64 -> 63 |
 | hotbar | number keys or click a slot | yes (slots 1-8; see below) |
 | **inventory** | `data get entity X Inventory`, rendered with baked item icons | yes, READ-ONLY |
 | **containers** | right-click reads the block's own NBT (`data get block`) | yes — barrel contents |

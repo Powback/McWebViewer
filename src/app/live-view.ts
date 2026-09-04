@@ -12,9 +12,10 @@
  * boundary can invalidate a dozen sections, and doing all of them between two frames is a
  * visible hitch.
  *
- * Players are drawn as one cached bind-pose mesh per session, re-transformed each poll.
- * They do not animate — there is no `setupAnim` here any more than there is for mobs —
- * so a walking player slides rather than strides. Stated, not hidden.
+ * Players are drawn as one cached bind-pose mesh per session, moved every FRAME from
+ * `PlayerTracks` rather than once per roster poll. They do not animate — there is no
+ * `setupAnim` here any more than there is for mobs — so a walking player slides rather
+ * than strides. Stated, not hidden.
  */
 
 import { meshSection, type MeshContext } from '../render/mesher.js';
@@ -34,6 +35,9 @@ import { navWorld } from './nav-world.js';
 import { TouchPad } from './touch-pad.js';
 import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
+import { PlayerTracks, type TrackPose } from './player-tracks.js';
+import { NameTags } from '../render/name-tags.js';
+import { followPlacement, nextFollowed } from './follow-camera.js';
 
 /** Regions are the overworld's; a player in the nether is tracked but not drawn. */
 const DRAWN_DIMENSION = 'minecraft:overworld';
@@ -63,6 +67,12 @@ export interface LiveViewDeps {
   getStates: () => import('../render/mesher.js').StateSource | null;
   hudRoot: HTMLElement;
   status: (msg: string) => void;
+  /**
+   * The ordinary fly camera. Follow needs to SEED its yaw and pitch rather than call
+   * `camera.lookAt`, because FlyControls rewrites the camera rotation from its own angles
+   * every frame and would undo it before it was ever drawn.
+   */
+  fly?: { lookAt: (x: number, y: number, z: number) => void };
 }
 
 export class LiveView {
@@ -87,6 +97,19 @@ export class LiveView {
   private drawn = new Set<string>();
   private syncing = false;
 
+  /** 1 Hz samples in, per-frame poses out. See player-tracks.ts. */
+  private tracks = new PlayerTracks(DRAWN_DIMENSION);
+  private tags: NameTags;
+  /** Latched when a label throws, so one broken canvas cannot stop the frame loop forever. */
+  private tagsBroken = false;
+  /** The poses drawn this frame, kept so follow and the HUD read the same numbers. */
+  private lastPoses: TrackPose[] = [];
+  /** The last set of unreadable dimensions reported, so it is said once and not every poll. */
+  private reportedUnknownDim = '';
+  private following: string | null = null;
+  /** Where the followed player was last frame; the camera moves by the difference. */
+  private followAnchor: [number, number, number] | null = null;
+
   /** Counters the HUD reports, so "it is connected" and "it is working" stay separable. */
   readonly stats = { chunksChanged: 0, sectionsRemeshed: 0, syncMs: 0, players: 0 };
 
@@ -96,6 +119,7 @@ export class LiveView {
 
   constructor(url: string, private deps: LiveViewDeps) {
     this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions);
+    this.tags = new NameTags(deps.viewer.scene);
     this.client = new ObserverClient(url, {
       status: deps.status,
       onPlayers: (list) => this.onPlayers(list),
@@ -218,6 +242,9 @@ export class LiveView {
   private onControl(control: ControlState): void {
     this.applyInputMode();
     this.hud.setVisible(control.joined === true);
+    // Taking control takes the camera. A follow lock left running would fight the driven
+    // camera for the same position every frame.
+    if (control.joined) this.stopFollow('follow released: you are driving now');
     if (!control.joined) {
       this.smoothed = null;
       this.selfKey = null;
@@ -347,39 +374,194 @@ export class LiveView {
   // -------------------------------------------------------------------------
   // Players
 
+  /**
+   * A roster poll arrived. NOTHING IS DRAWN HERE.
+   *
+   * This used to transform every player's mesh straight from the poll, which is a player
+   * that jumps once a second and stands still in between — and, because `addEntityMesh`
+   * disposes and re-uploads every buffer, it also re-uploaded the whole player model per
+   * player per second for the privilege. The poll now only feeds the tracker; the drawing
+   * happens per frame in `updatePlayers`.
+   */
   private onPlayers(list: LivePlayer[]): void {
     this.stats.players = list.length;
+    this.followBot(list);
+    this.tracks.ingest(
+      list.map((p) => ({
+        name: p.name,
+        pos: p.pos,
+        yawDeg: entityYawDeg(p.yaw),
+        dimension: p.dimension,
+      })),
+      performance.now(),
+    );
+    this.reportUnreadableDimensions();
+  }
+
+  /**
+   * Say which players are being withheld, and why.
+   *
+   * A player whose `Dimension` read failed is NOT drawn — putting them in the overworld
+   * because that is the dimension on screen would be inventing a fact to fill a gap, and it
+   * would look exactly like a successful read. Said once per change rather than once per
+   * poll, so it is a report and not a flood.
+   */
+  private reportUnreadableDimensions(): void {
+    const names = [...this.tracks.unknownDimension].sort().join(',');
+    if (names === this.reportedUnknownDim) return;
+    this.reportedUnknownDim = names;
+    if (!names) return;
+    this.deps.status(
+      `live: NOT drawing ${this.tracks.unknownDimension.size} player(s) — the bridge could` +
+        ` not read their Dimension: ${names}`,
+    );
+  }
+
+  /**
+   * One frame of players: interpolate, draw, label, follow.
+   *
+   * Called every frame from the app loop, AFTER the fly controls have moved the camera —
+   * the follow lock adds the followed player's movement on top of whatever the user just
+   * did, and running it first would have the controls overwrite it.
+   */
+  updatePlayers(): void {
+    const poses = this.tracks.poses(performance.now());
+    this.lastPoses = poses;
+    const visible = poses.filter((p) => !this.hidesSelf(p.name));
+    this.drawPlayers(visible);
+    this.label(visible);
+    this.updateFollow(poses);
+  }
+
+  /**
+   * Name tags, and the one thing that must not happen if they fail.
+   *
+   * This runs inside the frame loop, so an exception here does not merely lose the labels —
+   * it takes `requestAnimationFrame` with it and the whole viewer stops. The label is the
+   * least important thing on screen; the world is the most. So the failure is caught HERE,
+   * where there is something to do about it: labels off, world still rendering, and the
+   * reason on screen. Silently drawing no labels would be the other, worse answer.
+   */
+  private label(poses: readonly TrackPose[]): void {
+    if (this.tagsBroken) return;
+    try {
+      this.tags.update(poses, this.deps.viewer.camera);
+    } catch (e) {
+      this.tagsBroken = true;
+      this.tags.clear();
+      this.deps.status(`live: name tags are OFF — ${(e as Error).message}`);
+    }
+  }
+
+  private drawPlayers(poses: readonly TrackPose[]): void {
     const mesh = this.ensurePlayerMesh();
     const alive = new Set<string>();
-    this.followBot(list);
     this.selfKey = null;
-    for (const p of list) {
-      if (p.dimension !== null && p.dimension !== DRAWN_DIMENSION) continue;
-      // NEVER draw the player you ARE — in FIRST PERSON. The camera sits at that bot's eye
-      // height, inside its head, so drawing it puts the inside of a Steve skull across the
-      // view. A real client does the same: your own model is drawn in third person and
-      // skipped in first. The isometric camera is third person, and the character is the
-      // entire subject of that mode, so there it MUST be drawn.
-      if (this.hidesSelf(p.name)) continue;
-      const key = `player:${p.name}`;
+    for (const pose of poses) {
+      const key = `player:${pose.name}`;
       alive.add(key);
-      if (this.isBot(p.name)) {
+      if (this.isBot(pose.name)) {
         this.selfKey = key;
-        this.selfYawDeg = entityYawDeg(p.yaw);
+        this.selfYawDeg = pose.yawDeg;
       }
       if (!mesh) continue;
-      this.deps.viewer.addEntityMesh(key, mesh.layers, {
-        pos: p.pos,
-        angleDeg: entityYawDeg(p.yaw),
-        axis: 'Y',
-      });
-      this.drawn.add(key);
+      this.placePlayer(key, pose);
     }
     for (const key of this.drawn) {
       if (alive.has(key)) continue;
       this.deps.viewer.removeSection(key);
       this.drawn.delete(key);
     }
+  }
+
+  /**
+   * Upload the model ONCE per player and move it with a transform thereafter.
+   *
+   * The isometric view is the one exception: there the character being driven is placed
+   * from the 10 Hz self poll in `frameIso`, which is strictly better data than the 1 Hz
+   * roster, and two writers of one transform would fight at frame rate.
+   */
+  private placePlayer(key: string, pose: TrackPose): void {
+    const mesh = this.playerMesh;
+    if (!mesh) return;
+    if (!this.drawn.has(key)) {
+      this.deps.viewer.addEntityMesh(key, mesh.layers, {
+        pos: pose.pos,
+        angleDeg: pose.yawDeg,
+        axis: 'Y',
+      });
+      this.drawn.add(key);
+      return;
+    }
+    if (this.iso.active && this.isBot(pose.name)) return;
+    this.deps.viewer.setEntityTransform(key, pose.pos, pose.yawDeg);
+  }
+
+  // -------------------------------------------------------------------------
+  // Following
+
+  get followingName(): string | null {
+    return this.following;
+  }
+
+  /**
+   * Follow the next player on screen; from the last one, release.
+   *
+   * Deliberately a cycle that ends in "nobody": the key that starts it also stops it, which
+   * matters because a locked pointer can make an on-screen button unreachable (that is why
+   * the camera-mode toggle is also on a key — see main.ts).
+   */
+  followNext(): string | null {
+    if (this.controls.active || this.iso.active) {
+      this.deps.status('follow is for watching — the camera is being driven right now');
+      return null;
+    }
+    const next = nextFollowed(this.lastPoses.map((p) => p.name), this.following);
+    if (next === null) {
+      this.stopFollow(this.lastPoses.length ? 'follow released' : 'nobody to follow');
+      return null;
+    }
+    const pose = this.lastPoses.find((p) => p.name === next)!;
+    this.following = next;
+    // Null so the first locked frame does not translate the camera by the whole snap.
+    this.followAnchor = null;
+    const [x, y, z] = followPlacement(pose.pos, pose.yawDeg);
+    this.deps.viewer.camera.position.set(x, y, z);
+    this.deps.fly?.lookAt(pose.pos[0], pose.pos[1] + 1, pose.pos[2]);
+    this.deps.status(`following ${next} — F for the next player, Esc to release`);
+    return next;
+  }
+
+  stopFollow(reason = 'follow released'): void {
+    if (this.following === null) return;
+    this.following = null;
+    this.followAnchor = null;
+    this.deps.viewer.setSubject(null);
+    this.deps.status(reason);
+  }
+
+  /**
+   * Keep the camera with the followed player.
+   *
+   * Translation only, so mouse-look and WASD keep working — see follow-camera.ts. The
+   * subject reveal is asked for as well, because a followed player who walks behind a hill
+   * and is never seen again is a follow that has failed in the least obvious way.
+   */
+  private updateFollow(poses: readonly TrackPose[]): void {
+    if (this.following === null) return;
+    const pose = poses.find((p) => p.name === this.following);
+    if (!pose) {
+      this.stopFollow(`stopped following ${this.following}: they are no longer on screen`);
+      return;
+    }
+    const cam = this.deps.viewer.camera.position;
+    if (this.followAnchor) {
+      cam.x += pose.pos[0] - this.followAnchor[0];
+      cam.y += pose.pos[1] - this.followAnchor[1];
+      cam.z += pose.pos[2] - this.followAnchor[2];
+    }
+    this.followAnchor = [...pose.pos] as [number, number, number];
+    this.deps.viewer.setSubject(pose.pos);
   }
 
   /**
@@ -487,11 +669,32 @@ export class LiveView {
     const age = c.lastReloadAt ? (performance.now() - c.lastReloadAt) / 1000 : null;
     return ` | ${describeControl(c.control)}`
       + ` | LIVE ${c.connected ? describeFlush(c.flush) : 'offline'}`
-      + ` | ${this.stats.players} players`
+      + ` | ${this.playerLine()}`
       + (age === null ? '' : ` | flushed ${age.toFixed(0)}s ago (${c.flush?.lastDurationMs ?? 0}ms)`)
       + (this.stats.chunksChanged ? ` | ${this.stats.chunksChanged} chunks changed` : '')
       + (this.dirty.size ? ` | ${this.dirty.size} to re-mesh` : '')
       + `\n${this.inputLine()}`;
+  }
+
+  /**
+   * What the players on screen actually are.
+   *
+   * The delay is stated because it is real: poses are interpolated between samples, which
+   * means they are drawn about one poll behind live. A viewer that quietly showed
+   * second-old positions as if they were current would be the same class of lie as a stale
+   * position drawn as fresh — so the number is on screen next to the count.
+   *
+   * `STALE` is the load-bearing word. A held pose and a player standing still are identical
+   * on screen, and only one of them means the bridge has stopped answering.
+   */
+  private playerLine(): string {
+    const stale = this.lastPoses.filter((p) => p.stale).length;
+    const hidden = this.tracks.unknownDimension.size;
+    return `${this.stats.players} players (${this.lastPoses.length} drawn`
+      + `, ${(this.tracks.delayMs / 1000).toFixed(1)}s behind)`
+      + (stale ? ` | ${stale} STALE` : '')
+      + (hidden ? ` | ${hidden} not drawn: no Dimension read` : '')
+      + (this.following ? ` | FOLLOWING ${this.following} (F next, Esc release)` : '');
   }
 
   /**

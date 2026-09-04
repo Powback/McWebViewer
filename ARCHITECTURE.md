@@ -697,13 +697,91 @@ nearest-first by the same streaming mesher that loaded the page. No reload, so t
 and a driven bot survive. The atlas is fetched as `atlas.png?v=<hash>` so an HTTP cache
 cannot pair a new bundle with an old PNG.
 
+#### Drawing the players you can see: latency bought accuracy
+
+The roster arrives at 1 Hz and the first version drew it where it landed. That is not a
+slow update, it is a teleport: at a sprint the model is motionless for 59 frames and then
+covers 5.6 blocks in one — and because `addEntityMesh` disposes and re-uploads every
+buffer, it also re-uploaded the whole player model per player per second to do it.
+
+`src/app/player-tracks.ts` turns the sample stream into a pose stream, and the decision
+everything else follows is that poses are rendered on a **delay of one poll interval**, so
+the common case is interpolation between two readings we already have rather than
+extrapolation past the newest one. That is a deliberate trade of latency for accuracy, and
+the measured shape of it (`npm run players-proof`) is:
+
+| | newest sample, held | buffered interpolation |
+|---|---|---|
+| frames frozen while the player was moving | 98.8% | 32.0% |
+| biggest single-frame jump, excluding snaps | 4.0 blocks | 0.49 blocks |
+| distinct positions drawn | 16 | 932 |
+| mean distance from the true position | **4.1 blocks** | **6.1 blocks** |
+
+The latency row is worse and it is in the table for that reason. It is also on screen: the
+HUD prints `2 drawn, 1.1s behind`. A viewer that showed second-old positions as current
+would be the same class of lie as a stale position drawn as fresh.
+
+Four things are deliberately NOT smoothed, each because smoothing them would assert
+something false:
+
+- **Past 350 ms with no sample, the pose is HELD and flagged `STALE`** (amber name tag,
+  counted in the HUD) rather than dead-reckoned. Coasting on a stale velocity draws a
+  player walking calmly through a wall for the length of the outage, and a held-but-moving
+  player is indistinguishable on screen from a real one.
+- **A teleport snaps.** Above 45 blocks/s between samples — above anything a body does
+  under its own power, below anything `/tp` does — the buffer is discarded. Gliding across
+  half a kilometre is a lie about what happened.
+- **A dimension change discards the buffer outright.** Nether coordinates are an eighth of
+  overworld ones, so a line drawn between two adjacent readings across a portal crosses
+  terrain that does not exist.
+- **A player whose `Dimension` read failed is not drawn at all**, and is named in the HUD.
+  Drawing them in the dimension that happens to be on screen is the plausible-looking
+  default that turns a failed read into confident wrong output.
+
+The correction is a **speed cap, not an exponential ease**: the drawn position chases the
+target at at most 1.5× the speed the server says the player is doing, plus a 2.5 blocks/s
+floor. An ease with one time constant has to trade correction rate against steady-state
+lag; a cap does not, because while the target moves smoothly the step is inside the budget
+and the drawn position equals the target exactly.
+
+Two proofs, because the claim has two halves. `src/tools/players-proof.ts` measures the
+model with no browser and no server, against a ground truth it defines — which is what
+makes the "distance from the true position" column possible at all.
+`src/tools/player-view-proof.ts` drives the real page with the bridge socket **stubbed**,
+which is the only way to stage a player in the nether, a failed dimension read and a logout
+at a known instant; it measured a 0.075-block worst step over 361 frames, neither
+undrawable player ever drawn, the name sprite removed in the same frame as the model, and
+the follow lock moving the camera 7.516 blocks while the player moved 7.516 blocks.
+
+**Skins were considered and rejected again**, on the grounds already recorded in
+`src/render/player-model.ts`: it is not a package dependency but it is a *network* one, and
+a LAN-only viewer should not call Mojang for every player it sees. Presence is solved with
+a name tag and a per-name colour instead, which costs nothing outside the house.
+
+#### And the silent failures that were hiding behind all of it
+
+`await this.#pollOnce().catch(() => {})` in `bridge/src/observer.mjs` was the exact pattern
+this project keeps paying for. A failing roster poll produced no log, no message and no
+change on screen: the browser went on drawing the last roster it received, and a player
+frozen at a stale position looks precisely like a player standing still. It now counts,
+logs and tells the browser, which says so in the status line.
+
+The same shape appeared twice more in the player path, and both are now named rather than
+inferred: a `data get` reply that could not be parsed removed the player from the roster,
+which on screen is what logging out looks like — so anything that is not the server's own
+`No entity was found` is reported with the reply that caused it; and an unreadable
+`Dimension` is passed on as `null` and refused by the renderer instead of being defaulted.
+`bridge/src/observer.test.mjs` drives a real observer against a scripted RCON server and
+fails if any of the three goes quiet again.
+
 #### The honest limits
 
 Granularity is the flush interval, so this is seconds, not 20 tps. **Only blocks update** —
 mobs and items are read from the entity regions at load and never refreshed, so a turtle
 moving appears and a cow walking does not. Live players come from RCON and do update, but
-in bind pose and always as Steve. And a full-fidelity modded client in a browser remains a
-*streaming* problem (Sunshine + a web Moonlight client, or Selkies), not a protocol one.
+in bind pose, always as Steve, and about a second behind live (see above). And a
+full-fidelity modded client in a browser remains a *streaming* problem (Sunshine + a web
+Moonlight client, or Selkies), not a protocol one.
 
 ### What the current code already gives this
 

@@ -73,6 +73,22 @@ addEventListener('keydown', (e) => {
   toggleCamera();
 });
 
+/**
+ * Follow a player: F cycles through everyone on screen and off the end again, Escape lets
+ * go. Two ways out rather than one, because this is a camera lock and a camera lock you
+ * cannot escape is the worst thing on this page — and Escape is also what a browser hands
+ * you when it drops the pointer lock, so the two gestures already mean "give me the view
+ * back".
+ *
+ * Bound on the window, next to the camera toggle, for the same reason that one is: the
+ * canvas may hold the pointer lock, and a locked pointer never delivers a click to a button.
+ */
+addEventListener('keydown', (e) => {
+  if (!live || live.hud.typing || e.repeat) return;
+  if (e.code === 'KeyF') live.followNext();
+  else if (e.code === 'Escape') live.stopFollow();
+});
+
 function toggleCamera() {
   live?.toggleCameraMode();
   renderModeButton();
@@ -734,6 +750,7 @@ async function startObserving(url: string) {
     bakedBase: '/baked',
     hudRoot: document.body,
     status,
+    fly: controls,
   });
   live.onControlChange = (control) => {
     joinButton.render(control, true);
@@ -797,6 +814,11 @@ function frame() {
   // When a fake player is being driven the camera is server-authoritative; otherwise the
   // ordinary fly controls own it. Live mode is the same page either way.
   if (!live?.updateCamera(dt)) controls.update(dt);
+  // AFTER the camera has been moved by whoever owns it: players are interpolated between
+  // 1 Hz samples here, and a follow lock translates the camera by the followed player's
+  // movement on top of the input the user just gave. Doing it first would have the fly
+  // controls overwrite the lock every frame, which presents as "follow does nothing".
+  live?.updatePlayers();
   pumpMeshing();
   // Live re-meshes get their own budget: they are latency-sensitive in a way the
   // initial streaming load is not, and starving them behind a full region's backlog

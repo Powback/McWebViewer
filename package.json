@@ -14,6 +14,8 @@
     "render-proof": "tsx src/tools/render-proof.ts",
     "reveal-proof": "tsx src/tools/reveal-proof.ts",
     "walk-proof": "tsx src/tools/walk-proof.ts",
+    "players-proof": "tsx src/tools/players-proof.ts",
+    "player-view-proof": "tsx src/tools/player-view-proof.ts",
     "lint": "eslint src scripts bridge/src",
     "test": "tsx --test src/**/*.test.ts && node --test bridge/src/*.test.mjs",
     "build-shaderpack": "tsx src/tools/build-shaderpack.ts",

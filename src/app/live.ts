@@ -103,6 +103,8 @@ export class ObserverClient {
   sent = 0;
   /** Control frames refused by the `joined` gate below — they never reached the wire. */
   dropped = 0;
+  /** Player records the bridge sent that this browser could not use. Never silently zero. */
+  rejectedPlayers = 0;
   /**
    * The last control frame the BRIDGE said it handled.
    *
@@ -205,9 +207,25 @@ export class ObserverClient {
     status: (m) => this.hooks.status(String(m.message)),
     error: (m) => this.hooks.status(String(m.message)),
     players: (m) => {
-      this.players = readPlayers(m.list);
+      const { players, rejected } = readPlayers(m.list);
+      // A record the browser could not use is not the same as a player who logged out, and
+      // dropping it quietly makes the two identical on screen. Counted and said.
+      if (rejected) {
+        this.rejectedPlayers += rejected;
+        this.hooks.status(
+          `live: ${rejected} unusable player record(s) in this poll (${this.rejectedPlayers}` +
+            ' since connect) — they are NOT drawn',
+        );
+      }
+      this.players = players;
       this.hooks.onPlayers(this.players);
     },
+    // The bridge could not read the roster at all. Without this the browser sees only an
+    // absence of messages, which is indistinguishable from an idle server.
+    pollError: (m) => this.hooks.status(
+      `live: the bridge's player poll is failing (${Number(m.failures) || 1} in a row):` +
+        ` ${String(m.message)} — the players on screen are STALE`,
+    ),
     self: (m) => {
       const pos = m.pos as [number, number, number];
       if (!Array.isArray(pos) || pos.length !== 3 || !pos.every(Number.isFinite)) return;
@@ -252,23 +270,32 @@ export class ObserverClient {
  * to a NaN position by silently dropping the whole mesh, which looks exactly like "the
  * feature does not work".
  */
-function readPlayers(raw: unknown): LivePlayer[] {
-  if (!Array.isArray(raw)) return [];
-  const out: LivePlayer[] = [];
+export function readPlayers(raw: unknown): { players: LivePlayer[]; rejected: number } {
+  if (!Array.isArray(raw)) return { players: [], rejected: 0 };
+  const players: LivePlayer[] = [];
+  let rejected = 0;
   for (const e of raw as Array<Record<string, unknown>>) {
     const pos = e.pos;
-    if (typeof e.name !== 'string' || !Array.isArray(pos) || pos.length !== 3) continue;
+    if (typeof e.name !== 'string' || !Array.isArray(pos) || pos.length !== 3) {
+      rejected++;
+      continue;
+    }
     const xyz = pos.map(Number) as [number, number, number];
-    if (!xyz.every(Number.isFinite)) continue;
-    out.push({
+    if (!xyz.every(Number.isFinite)) {
+      rejected++;
+      continue;
+    }
+    players.push({
       name: e.name,
       pos: xyz,
       yaw: Number(e.yaw) || 0,
       pitch: Number(e.pitch) || 0,
+      // NOT defaulted to the dimension on screen. A dimension we could not read is a fact we
+      // do not have, and the renderer refuses to draw the player rather than assume one.
       dimension: typeof e.dimension === 'string' ? e.dimension : null,
     });
   }
-  return out;
+  return { players, rejected };
 }
 
 const DISABLED_CONTROL: ControlState = {

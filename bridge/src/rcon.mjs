@@ -109,11 +109,18 @@ export class RconClient {
       packet.writeInt32LE(type, 8);
       payload.copy(packet, 12);
       packet.writeInt16LE(0, 12 + payload.length);
-      this.#pending.set(id, { resolve, reject });
-      this.#socket.write(packet);
-      setTimeout(() => {
+      // The timeout handle is kept and cleared on the way out. Without that, every command
+      // leaves an 8-second timer behind after it has already been answered, which holds the
+      // event loop open — harmless in a long-running bridge, and enough to add ten seconds
+      // to any test that makes one.
+      const timer = setTimeout(() => {
         if (this.#pending.delete(id)) reject(new Error(`rcon timeout: ${body.slice(0, 40)}`));
       }, 8000);
+      this.#pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      this.#socket.write(packet);
     });
   }
 

@@ -50,9 +50,11 @@ their reasons, and an explicit list of what was rejected and why.
   block pipeline under the entity transform, with no Create-specific geometry code.
 - **Coverage audit** — a repeatable command that reports exactly what does and does not
   render.
-- **Live mode** — an RCON bridge draws players at ~1 Hz and re-reads changed chunks after
+- **Live mode** — an RCON bridge polls players at ~1 Hz and re-reads changed chunks after
   a **guarded** `save-all flush` (off by default, only while a viewer is connected, 2 s
-  floor, self-backing-off). Only the sections that actually differ are re-meshed. See
+  floor, self-backing-off). Only the sections that actually differ are re-meshed. Players
+  are interpolated between samples so they walk rather than teleport, carry a name tag, go
+  stale visibly when the bridge does, and can be followed with `F`. See
   [Live mode](#live-mode--watching-a-running-server).
 - **Play from the browser** — a Join button spawns a server-side fake player you drive
   with WASD and the mouse. Needs SiliconeDolls on the server; off by default, and the
@@ -67,7 +69,11 @@ Stated plainly; see ARCHITECTURE.md §6.
   still draw nothing — none has a `LayerDefinition` to extract. See ARCHITECTURE.md §6.
 - **Entities render in bind pose** — no `setupAnim`, so a spider's legs stay horizontal;
   no secondary layers (sheep fur, armour, saddles). Live players are drawn the same way,
-  and always with the default Steve skin.
+  and always with the default Steve skin — they slide rather than stride, and they are told
+  apart by a name tag rather than by their face.
+- **Live players are drawn about a second behind live.** That is the cost of interpolating
+  between two real samples instead of guessing past the newest one; the HUD prints the
+  number. See [Live players](#live-players).
 - **Live mode sees blocks, not entities.** Mobs and items are read from the save files at
   load and are not refreshed; a turtle moving shows up (it is a block), a cow walking does
   not. Live *players* come from RCON and do update.
@@ -192,10 +198,67 @@ You fly with the ordinary controls. Live mode does not drive anything in the wor
 #### Live players
 
 Polled at 1 Hz (`MCWV_POLL_MS`, floor 500 ms), drawn with the extracted player model.
-Two honest limits: everyone is **Steve** — fetching real skins would mean the page
-calling Mojang for every player it sees, which a LAN-only viewer should not do — and
-they render in **bind pose**, like every other entity here, so a walking player slides
-rather than strides.
+
+**They move between samples.** A 1 Hz sample drawn where it lands is a player who
+teleports five blocks once a second and stands still in between, so the samples are
+buffered and the pose is interpolated between the two readings either side of a render
+clock that runs about one poll behind live. That delay is the price of interpolating
+rather than guessing, and the HUD prints it: `3 players (2 drawn, 1.1s behind)`.
+
+A sample that is late is bridged by up to 350 ms of dead reckoning and then the pose is
+**held** and marked `STALE` — its name tag turns amber. Coasting on a stale velocity would
+walk a player calmly through a wall for as long as the bridge was down, and nothing on
+screen would say so. A teleport and a dimension change are drawn as what they are: an
+instant jump, never a glide across terrain the player was never in.
+
+**They have names.** Each player carries a canvas-textured label above their head with a
+colour derived from the name (so the same drone is the same colour every session). It is
+drawn through terrain, and past 24 blocks it stops shrinking, so it stays readable across a
+base.
+
+**Press F to follow one**, again for the next, and again — or Escape — to let go. The
+camera snaps behind them and then keeps their movement, translating only, so mouse-look and
+WASD keep working the whole time. Whatever is between the camera and them is cut away with
+the same reveal the isometric view uses.
+
+Three honest limits: everyone is **Steve** — fetching real skins would mean the page
+calling Mojang for every player it sees, which a LAN-only viewer should not do — they
+render in **bind pose**, like every other entity here, so a walking player slides rather
+than strides, and a player whose `Dimension` read failed is **not drawn at all**. That last
+one is deliberate: putting them in the dimension that happens to be on screen would be
+inventing a fact, so instead the HUD says `1 not drawn: no Dimension read` and names them.
+
+Proved by two harnesses, for the two halves of it:
+
+```bash
+npm run players-proof        # the motion model: no server, no browser, numbers in blocks
+npm run dev                  # then, in another terminal:
+npm run player-view-proof    # the real page and a stubbed bridge: what the renderer does
+```
+
+`players-proof` replays a scripted route (sprint, stop, a turn through north, an elytra
+dive, a teleport, a nether trip, a logout, a dropped poll and a three-second stall) through
+both the old model and the new one:
+
+| | before: newest sample, held | after: buffered interpolation |
+|---|---|---|
+| frames frozen while the player was moving | **98.8%** | 32.0% (all of it deliberate — see below) |
+| biggest single-frame jump, excluding snaps | 4.0 blocks | **0.49 blocks** |
+| distinct positions drawn | 16 | **932** |
+| mean distance from the true position | 4.1 blocks | 6.1 blocks |
+| drawn somewhere the player never was | 0.25 blocks worst | **0.11 blocks worst** |
+
+The residual 32% is the stalled bridge (held on purpose, and flagged) plus the second after
+each teleport, where the buffer holds one sample and there is genuinely nothing to
+interpolate between. The latency row is the trade, stated rather than buried: the new model
+is *further behind* and *much closer to the real path*.
+
+`player-view-proof` then drives the actual page with a fake bridge socket, which is the only
+way to stage a player who is in the nether, a player whose dimension read failed, and a
+logout at a known instant. Measured: 361 frames drawn with a **0.075-block** worst step and
+297 distinct positions; the nether player and the unreadable-dimension player never drawn;
+one name sprite while one player was drawable and zero after they left; and the follow lock
+moving the camera **7.516 blocks** while the player moved **7.516 blocks**.
 
 #### Live block changes — and what they cost the server
 

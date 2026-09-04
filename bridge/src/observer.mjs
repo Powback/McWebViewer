@@ -52,6 +52,15 @@ export const INVENTORY_DEFAULT_MS = 2000;
 /** Cap the per-tick command count regardless of how busy the server gets. */
 export const MAX_TRACKED_DEFAULT = 10;
 
+/**
+ * The server's own words for "that player is not here any more".
+ *
+ * Emitted when somebody logs out or changes dimension between the `list` and the `data
+ * get` that follows it. It is the ONLY parse failure that is not a fault, which is why it
+ * is matched explicitly instead of treating every unreadable reply as a departure.
+ */
+const LEFT_RE = /No entity was found/i;
+
 export class Observer {
   #rcon = null;
   /**
@@ -69,6 +78,8 @@ export class Observer {
    */
   #control = null;
   #stopped = false;
+  /** Pending reconnect timers, so `stop()` really stops. */
+  #retries = new Set();
   #polling = false;
   #selfPolling = false;
   #clients = 0;
@@ -88,6 +99,10 @@ export class Observer {
     this.inventoryMs = opts.inventoryMs ?? INVENTORY_DEFAULT_MS;
     this.maxTracked = opts.maxTracked ?? MAX_TRACKED_DEFAULT;
     this.players = [];
+    /** Consecutive roster polls that threw. Nonzero means the players on screen are stale. */
+    this.pollFailures = 0;
+    /** `data get` replies that could not be parsed, and were not a departure. */
+    this.readFailures = 0;
     this.self = null;
     this.vitals = null;
     this.inventory = [];
@@ -174,9 +189,11 @@ export class Observer {
     if (this.#stopped) return;
     this.flushTimer.stop();
     this.emit({ t: 'error', message: 'rcon disconnected — retrying in 10s' });
-    setTimeout(() => {
+    // Tracked so `stop()` can cancel it. Without that a stopped observer still holds a
+    // 10-second timer, which keeps the process (and every test that made one) alive.
+    this.#retries.add(setTimeout(() => {
       if (!this.#stopped) this.start().catch((e) => this.log(`rcon start failed: ${e.message}`));
-    }, 10_000);
+    }, 10_000));
   }
 
   /** Viewer count drives BOTH the flush timer and the poll loop: no viewers, no traffic. */
@@ -279,12 +296,66 @@ export class Observer {
     this.#polling = true;
     try {
       while (!this.#stopped && this.ready && this.#clients > 0) {
-        await this.#pollOnce().catch(() => {});
+        await this.#pollOnce().then(() => this.#pollRecovered(), (e) => this.#pollFailed(e));
         await sleep(this.pollMs);
       }
     } finally {
       this.#polling = false;
     }
+  }
+
+  /**
+   * A roster poll that failed is REPORTED, not swallowed.
+   *
+   * This was `.catch(() => {})`. The consequence is not that nothing happens — it is that
+   * the browser keeps drawing the last roster it received, with no message of any kind
+   * saying the numbers behind those players stopped moving. A player frozen at a stale
+   * position looks exactly like a player standing still, and that is the single most
+   * expensive failure shape this project has: a plausible-looking default carried on as if
+   * it were an answer.
+   *
+   * Every failure goes to the bridge log. The browser is told on the first one and then
+   * every tenth, which is often enough to be impossible to miss and rare enough not to
+   * bury the rest of the status line.
+   */
+  #pollFailed(err) {
+    this.pollFailures++;
+    this.log(`player poll FAILED (${this.pollFailures} in a row): ${err.message}`);
+    if (this.pollFailures === 1 || this.pollFailures % 10 === 0) {
+      this.emit({
+        t: 'pollError',
+        scope: 'players',
+        failures: this.pollFailures,
+        message: err.message,
+      });
+    }
+  }
+
+  #pollRecovered() {
+    if (!this.pollFailures) return;
+    const n = this.pollFailures;
+    this.pollFailures = 0;
+    this.log(`player poll recovered after ${n} failure(s)`);
+    this.emit({ t: 'status', message: `player poll recovered after ${n} failure(s)` });
+  }
+
+  /**
+   * A `data get` whose reply we could not parse.
+   *
+   * "No entity was found" is the server telling us the player left between the `list` and
+   * this read; that is ordinary and handled by the caller. Anything else is a reply we do
+   * not understand, and the visible effect of returning null for it is a player who
+   * silently vanishes from the roster — identical on screen to one who logged out. So it is
+   * named, with the reply that caused it, rather than counted as a departure.
+   */
+  #readFailed(name, field, reply) {
+    this.readFailures++;
+    const text = String(reply ?? '').slice(0, 120);
+    this.log(`unreadable ${field} for ${name}: ${JSON.stringify(text)}`);
+    this.emit({
+      t: 'status',
+      message: `bridge: could not read ${field} for ${name} — NOT drawing them (${text})`,
+    });
   }
 
   /**
@@ -397,9 +468,17 @@ export class Observer {
       this.#run(`data get entity ${name} Dimension`),
     ]);
     const pos = parsePos(posOut);
-    if (!pos) return null;
+    if (!pos) {
+      if (!LEFT_RE.test(String(posOut))) this.#readFailed(name, 'Pos', posOut);
+      return null;
+    }
     const rot = parseRotation(rotOut) ?? { yaw: 0, pitch: 0 };
-    return { name, pos, yaw: rot.yaw, pitch: rot.pitch, dimension: parseDimension(dimOut) };
+    const dimension = parseDimension(dimOut);
+    // Passed on as null rather than defaulted. The browser refuses to draw a player whose
+    // dimension is unknown, because guessing puts a nether player in the overworld and
+    // nothing on screen would say so.
+    if (dimension === null) this.#readFailed(name, 'Dimension', dimOut);
+    return { name, pos, yaw: rot.yaw, pitch: rot.pitch, dimension };
   }
 
   #run(command) {
@@ -424,7 +503,7 @@ export class Observer {
     link.onClose = () => {
       if (this.#control !== link) return;
       this.#control = null;
-      if (!this.#stopped) setTimeout(() => void this.#ensureControl(), 10_000);
+      if (!this.#stopped) this.#retries.add(setTimeout(() => void this.#ensureControl(), 10_000));
     };
     try {
       await link.connect();
@@ -467,6 +546,8 @@ export class Observer {
 
   stop() {
     this.#stopped = true;
+    for (const t of this.#retries) clearTimeout(t);
+    this.#retries.clear();
     this.flushTimer.stop();
     this.chatLog?.stop();
     this.#rcon?.close();

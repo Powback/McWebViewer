@@ -667,6 +667,36 @@ go into a dirty set that is drained on a per-frame budget.
 Measured on the deployed viewer: an idle poll costs 8 KB; a poll that found changes
 re-meshed 17–55 sections in 23–174 ms.
 
+#### The bundle is a snapshot; the world is not
+
+All of the above re-reads the *world* correctly and was doing so while the viewer showed a
+tower with no walls. The asset bake (`src/tools/bake-assets.ts`) resolves geometry only for
+the block states the regions contained at bake time — that is what keeps it at 224 KB
+rather than the 476 MB jar surface — and `ServedStates.resolve()` returns an empty model
+for any key the bundle lacks. So a block that first appears after the bake is invisible,
+and the live sync faithfully re-meshes chunks it cannot draw. On the reference server the
+turtles started laying `minecraft:stone_bricks` (and eight wall/stair variants) after the
+bake, and `computercraft:turtle_normal[facing=south]` was never in it either: a turtle that
+turned south vanished until it turned back.
+
+The design had anticipated this — `missingState()` says "counted so the HUD can say the
+bundle is stale" — but the HUD read `diag.unresolved`, a snapshot taken at load, before any
+section had been meshed, so it always said zero. The lesson is the one about silent
+failures again, with a twist: the *count existed*, and it was read at the one moment it
+could not yet be non-zero. Diagnostics that fill in over time must be read live.
+
+Now: `StateSource` exposes `unresolved` and `missing` (the subset a re-bake fixes), the HUD
+reads them every frame, and `src/server/bake-plan.ts` turns "is the bundle stale" into a set
+comparison — the world contains a state, biome or entity type the bundle does not — which
+`bake-assets --watch` runs every 30 s in the `mcwv-baker` container, baking (≈1 s) only on
+a difference and writing atomically. The page, while anything is missing, polls
+`/baked/assets.json` with `no-store` on a backing-off timer (`src/app/bake-refresh.ts`)
+and on a new `generated` swaps the bundle in place: new registry, atlas and mesh context,
+every section and entity mesh dropped (sprite rects move between bakes) and rebuilt
+nearest-first by the same streaming mesher that loaded the page. No reload, so the camera
+and a driven bot survive. The atlas is fetched as `atlas.png?v=<hash>` so an HTTP cache
+cannot pair a new bundle with an old PNG.
+
 #### The honest limits
 
 Granularity is the flush interval, so this is seconds, not 20 tps. **Only blocks update** —

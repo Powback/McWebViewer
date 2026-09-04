@@ -76,6 +76,18 @@ export interface BakedAssets {
   regions: string[];
   unresolved: string[];
   missingSprites: string[];
+  /**
+   * The entity types the bake collected sprites for. The baker's staleness check needs
+   * them, because nothing else in the bundle says which mobs it can draw. Optional so a
+   * bundle from before the field is still readable — it is treated as stale once.
+   */
+  entityTypes?: string[];
+  /**
+   * Hash of atlas.png as written next to this JSON. The client fetches the PNG as
+   * `atlas.png?v=<hash>`, so a bundle and its atlas can never be paired across a re-bake
+   * by an HTTP cache that expired one and not the other — sprite rects move between bakes.
+   */
+  atlasHash?: string;
 }
 
 function r4(n: number): number {

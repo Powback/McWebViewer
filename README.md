@@ -251,6 +251,30 @@ re-meshing all of that every 5 s would not be a live view. Instead
 Measured on the deployed viewer: an idle poll costs **8 KB**, and a poll that found
 changes re-meshed 17–55 sections in **23–174 ms**.
 
+#### The bake has to keep up with the world
+
+The baked bundle (`npm run bake-assets`) contains geometry for **the block states the
+world had when it was baked** and nothing else. A live world outgrows it: the first block
+of a kind the bake never saw resolves to an empty model and is drawn as *nothing*. That is
+a silent failure with a specific shape — the region files are current, the live sync is
+re-reading the right chunks, the players move, and a tower the turtles built after the
+bake is simply not there. It happened on the reference server: three days after the bake,
+nine stone-brick states in the world and none in the bundle.
+
+Two things now make that loud and then fix it:
+
+- the HUD counts states the bundle lacks, live — `9 NOT IN BAKE — waiting for a re-bake` —
+  read from the registry as sections are meshed rather than copied once at load (when the
+  count is always zero);
+- the `mcwv-baker` service in `docker-compose.yaml` re-scans the regions every 30 s
+  (`MCWV_BAKE_MS`) and **re-bakes only when the world contains something the bundle does
+  not**. The page polls for the new bundle while anything is missing and swaps it in
+  without a reload: every mesh is rebuilt against the new atlas, nearest first, and the
+  camera (and a driven bot) stay where they were.
+
+A bake is about a second of CPU; the loop's cost is the scan. Without the baker running,
+`npm run bake-assets` by hand still works and the page still picks it up.
+
 #### RCON reachability, without touching the server
 
 The reference server has `enable-rcon=true` on port 25575, but **does not publish that

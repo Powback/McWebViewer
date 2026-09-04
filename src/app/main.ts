@@ -26,7 +26,8 @@ import {
 import type { NbtCompound, NbtList } from '../core/nbt.js';
 import { FlyControls } from './controls.js';
 import { ShaderView } from './shader-view.js';
-import { loadServedAssets } from '../render/served-assets.js';
+import { loadServedAssets, type ServedAssets } from '../render/served-assets.js';
+import { BakeRefresh } from './bake-refresh.js';
 import { PLAYER_TYPE, withPlayerModel } from '../render/player-model.js';
 import { JoinButton } from './join-button.js';
 import { LiveView } from './live-view.js';
@@ -101,6 +102,11 @@ let stack: PackStack | null = null;
  */
 let registry: StateSource | null = null;
 let live: LiveView | null = null;
+/**
+ * Looks for a newer bake while the one on screen lacks states the world has. Null on the
+ * jar path, where there is no bake to refresh.
+ */
+let bakeRefresh: BakeRefresh | null = null;
 /**
  * WebGPU shaderpack path. Null until `?shaders=<pack>` asks for it AND it initialises;
  * everything downstream checks `shaders?.active`, so a failure anywhere leaves the
@@ -566,6 +572,18 @@ async function autoLoadBaked(): Promise<boolean> {
   status('loading extracted entity models...');
   entityModels = await loadModelsWithPlayer();
 
+  applyBaked(baked);
+  bakeRefresh = new BakeRefresh(baked.generated);
+
+  placeCamera();
+  renderEntities();
+  rebuildQueue();
+  return true;
+}
+
+/** Make a served bundle THE bundle: registry, atlas, tints, mesh context, diagnostics. */
+function applyBaked(baked: ServedAssets): void {
+  registry = baked.registry;
   diag.unresolved = baked.registry.unresolved.size;
   diag.atlasSprites = baked.atlas.sprites.size;
   diag.atlasMissing = baked.atlas.missing.size;
@@ -578,14 +596,55 @@ async function autoLoadBaked(): Promise<boolean> {
   shaders?.setAtlas(baked.atlas);
   (globalThis as Record<string, unknown>).__mcwv = {
     world, registry: baked.registry, atlas: baked.atlas, biomes: baked.biomes,
-    diag, viewer, controls, pendingEntities, baked: true,
+    diag, viewer, controls, pendingEntities, baked: true, generated: baked.generated,
     shaders: () => shaders?.status(),
   };
+}
 
-  placeCamera();
+/**
+ * Adopt a newer bake IN PLACE.
+ *
+ * The bundle is a snapshot of the world's block inventory and a live world outgrows it: a
+ * state the bake never saw is drawn as nothing, so a tower the turtles built after the
+ * bake is simply not there. Once a re-bake lands, this swaps it in without a page reload —
+ * a reload drops the camera and, in live mode, closes the socket, which despawns a bot
+ * someone is driving.
+ *
+ * The world data is untouched by a re-bake; only the geometry is stale. But ALL of it is:
+ * every mesh on screen was built against the old atlas and sprite rects move between
+ * bakes, so every section and entity goes and the streaming mesher rebuilds them
+ * nearest-first exactly as it did on load. A few seconds of filling in, then a complete
+ * world.
+ */
+function swapBaked(next: ServedAssets): void {
+  applyBaked(next);
+  bakeRefresh?.adopt(next.generated);
+  viewer.clear();
+  diag.sections = 0;
+  diag.contraptions = 0;
+  diag.contraptionBlocks = 0;
+  diag.entityQuads = 0;
+  live?.invalidateMeshes();
   renderEntities();
   rebuildQueue();
-  return true;
+  status(`bake refreshed: ${next.stateCount} states, ${next.atlas.sprites.size} sprites — re-meshing`);
+}
+
+/**
+ * While the bundle on screen lacks states the world has, look for a newer one. The policy
+ * in bake-refresh.ts decides WHEN (never while nothing is missing, backing off while
+ * nothing changes); this only performs the fetch and the swap.
+ */
+function pollBakeRefresh(now: number): void {
+  const r = bakeRefresh;
+  if (!r || !r.due(now, registry?.missing?.size ?? 0)) return;
+  r.inFlight = true;
+  loadServedAssets(['/baked'], { fresh: true })
+    .then((next) => {
+      if (next && r.isNew(next.generated)) swapBaked(next);
+    })
+    .catch((e: unknown) => status(`bake refresh failed: ${(e as Error).message}`))
+    .finally(() => { r.inFlight = false; });
 }
 
 async function autoLoad() {
@@ -706,8 +765,26 @@ function worldHud(
     + shaderHud(shaderStats)
     + (diag.entitiesDrawn ? ` | ${diag.entitiesDrawn} mobs` : '')
     + (diag.queued ? ` | ${diag.queued} queued` : '')
-    + (diag.unresolved ? ` | ${diag.unresolved} UNRESOLVED` : '')
+    + unresolvedHud()
     + (live?.hudLine() ?? '');
+}
+
+/**
+ * Read LIVE from the registry, not from the snapshot taken at load. States are resolved as
+ * sections are meshed, so at load time the count is always zero — which is how a bundle
+ * the world had outgrown by nine stone-brick states looked exactly like a complete one, on
+ * a HUD that was built to say otherwise. The two numbers are kept apart because they have
+ * different fixes: NOT IN BAKE means the bake predates the block (re-run it, or the baker
+ * will); UNRESOLVED means no jar has a model for it at all.
+ */
+function unresolvedHud(): string {
+  const missing = registry?.missing?.size ?? 0;
+  const unresolved = (registry?.unresolved?.size ?? diag.unresolved) - missing;
+  diag.unresolved = unresolved + missing;
+  return (unresolved > 0 ? ` | ${unresolved} UNRESOLVED` : '')
+    + (missing > 0
+      ? ` | ${missing} NOT IN BAKE${bakeRefresh ? ' — waiting for a re-bake' : ''}`
+      : '');
 }
 
 let panelTick = 0;
@@ -725,6 +802,7 @@ function frame() {
   // initial streaming load is not, and starving them behind a full region's backlog
   // is what makes a "live" view feel dead.
   live?.pump();
+  pollBakeRefresh(now);
 
   const shaderStats = shaders?.active ? shaders.render(viewer.camera, dt) : null;
   // WebGPU reports validation errors asynchronously, so the panel has to be re-read

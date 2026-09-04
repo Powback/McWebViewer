@@ -32,6 +32,35 @@ services:
       - default
       - traefik
 
+  # The baker: keeps the served asset bundle in step with a LIVE world.
+  #
+  # .cache/baked is a snapshot of the block states the world contained when it was made.
+  # Turtles place blocks the bake has never seen, and a state the bundle lacks is drawn as
+  # NOTHING — the reference server showed a tower with no walls for three days this way,
+  # with the region files current and the live sync working the whole time. This service
+  # re-scans the regions every MCWV_BAKE_MS and re-bakes ONLY when the world contains a
+  # state, biome or entity type the bundle does not (src/server/bake-plan.ts) — about a
+  # second of CPU, a few times an hour while turtles build. The page notices the new
+  # bundle and swaps it in without a reload.
+  #
+  # It is the ONLY container in this project with a writable mount, and that mount is this
+  # project's own .cache. The world and the mods are read-only here as everywhere else.
+  mcwv-baker:
+    build:
+      context: .
+      target: baker
+    container_name: mcwv-baker
+    restart: unless-stopped
+    init: true
+    environment:
+      # Must match the viewer's MCWV_REGIONS above: it bakes what the viewer serves.
+      MCWV_REGIONS: "r.-1.0.mca"
+      MCWV_BAKE_MS: "${MCWV_BAKE_MS:-30000}"
+    volumes:
+      - /Users/macback/Projects/minecraft-create121/data/world:/data/world:ro
+      - /Users/macback/Projects/minecraft-create121/data/mods:/data/mods:ro
+      - ./.cache:/data/client
+
   # The live tier: a READ-ONLY RCON observer. A browser cannot open a TCP socket, so this
   # process holds the RCON connection and reports player positions plus "the server has
   # flushed" over one WebSocket. It is reached at ws://mcwebviewer.pow/live — nginx

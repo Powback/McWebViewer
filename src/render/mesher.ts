@@ -29,6 +29,15 @@ import type { TextureAtlas } from './atlas.js';
  */
 export interface StateSource {
   resolve(stateKey: string): RenderableState;
+  /**
+   * Diagnostics, filled in AS STATES ARE RESOLVED — so they are only complete after
+   * meshing, and anything that reports them must read them live rather than copy them
+   * once at load. `unresolved` is every key that produced no geometry; `missing` is the
+   * subset a served bake simply did not contain (the world gained the block after the
+   * bake), which is the one a re-bake fixes.
+   */
+  readonly unresolved?: ReadonlySet<string>;
+  readonly missing?: ReadonlySet<string>;
 }
 
 export interface TintLookup {

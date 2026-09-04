@@ -1,8 +1,19 @@
 /**
  * ASSET BAKE — turns 129 jars into one small bundle the browser can actually fetch.
  *
- *   npx tsx src/tools/bake-assets.ts [--world <dir>] [--mods <dir>] [--client <jar>]
+ *   npx tsx src/tools/bake-assets.ts [--world <dir>] [--mods <dir>] [--client <jar|dir>]
  *                                    [--regions r.-1.0.mca,...] [--out .cache/baked]
+ *                                    [--watch <ms>]
+ *
+ * `--watch` turns the one-shot bake into the baker: re-scan the regions every <ms> and
+ * re-bake ONLY when the world contains a state, biome or entity type the served bundle
+ * does not (src/server/bake-plan.ts). This exists because the bundle is a snapshot of a
+ * live world's inventory, and a live world outgrows it — turtles built a stone-brick tower
+ * on the reference server and the viewer drew none of it for three days, because
+ * `minecraft:stone_bricks` was not in a bundle baked before the first brick was laid. The
+ * region files were current the whole time; the geometry to draw them was not. The
+ * docker-compose `mcwv-baker` service runs this mode against the same mounts the viewer
+ * serves from. A bake is ~1 s of CPU, so the loop's cost is the scan, not the bake.
  *
  * The problem this solves: `?auto=1` had the browser download every jar — ~476 MB for the
  * reference set — and then unzip, resolve blockstates, bake models, decode PNGs and pack
@@ -20,9 +31,13 @@
  * silently dropped at mesh time.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { gzipSync } from 'fflate';
+import { planBake } from '../server/bake-plan.js';
 import { PackStack, ZipPack } from '../assets/pack.js';
 import { BlockRegistry, type RenderableState } from '../render/registry.js';
 import { BiomeColors } from '../render/biome.js';
@@ -52,10 +67,26 @@ function arg(name: string, def: string): string {
   return i >= 0 ? process.argv[i + 1] : def;
 }
 
-function loadPacks(modsDir: string, clientJar: string): PackStack {
+/**
+ * `--client` may name the jar or the directory it sits in (the baker container mounts the
+ * whole .cache). The harness leaves a `client-<ver>-deobf.jar` next to the real one — a
+ * 28 MB remapped copy with no assets/ — which is skipped by name, as the nginx entrypoint
+ * skips it.
+ */
+function resolveClientJar(path: string): string | null {
+  if (!existsSync(path)) return null;
+  if (!statSync(path).isDirectory()) return path;
+  const jar = readdirSync(path)
+    .filter((f) => /^client.*\.jar$/i.test(f) && !f.endsWith('-deobf.jar'))
+    .sort()[0];
+  return jar ? join(path, jar) : null;
+}
+
+function loadPacks(modsDir: string, client: string): PackStack {
   const stack = new PackStack();
-  if (!existsSync(clientJar)) {
-    throw new Error(`no vanilla client jar at ${clientJar} — run: npm run fetch-assets`);
+  const clientJar = resolveClientJar(client);
+  if (!clientJar) {
+    throw new Error(`no vanilla client jar at ${client} — run: npm run fetch-assets`);
   }
   stack.add(ZipPack.fromZip('client.jar', new Uint8Array(readFileSync(clientJar))));
   let mods = 0;
@@ -188,17 +219,134 @@ function resolveAll(registry: BlockRegistry, keys: Set<string>): Map<string, Ren
   return out;
 }
 
-function main(): void {
-  const world = arg('--world', DEFAULTS.world);
-  const out = arg('--out', DEFAULTS.out);
-  const regions = regionList(world, arg('--regions', ''));
-  console.log(`world ${world}\nregions: ${regions.join(', ') || '(none)'}`);
+interface BakeOptions {
+  world: string;
+  mods: string;
+  client: string;
+  out: string;
+  regions: string[];
+}
 
-  const pack = loadPacks(arg('--mods', DEFAULTS.mods), arg('--client', DEFAULTS.client));
-  const t0 = Date.now();
-  const scan = scanRegions(world, regions);
+function readOptions(): BakeOptions {
+  const world = arg('--world', DEFAULTS.world);
+  return {
+    world,
+    mods: arg('--mods', DEFAULTS.mods),
+    client: arg('--client', DEFAULTS.client),
+    out: arg('--out', DEFAULTS.out),
+    // The same variable the viewer container autoloads from, so one setting names the
+    // regions both for serving and for baking.
+    regions: regionList(world, arg('--regions', process.env.MCWV_REGIONS ?? '')),
+  };
+}
+
+/** The served bundle, if there is one, for the staleness comparison. */
+function readBundle(out: string): BakedAssets | null {
+  const path = join(out, 'assets.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as BakedAssets;
+  } catch {
+    return null; // half-written or corrupt: bake over it
+  }
+}
+
+/**
+ * Write to a sibling and rename into place. nginx serves this directory while it is being
+ * written and the browser fetches assets.json and atlas.png as two requests; a truncated
+ * JSON is a broken page, and rename is atomic where a write is not. Rename also succeeds
+ * over a file another user owns, which matters when the baker container and `npm run
+ * bake-assets` on the host take turns writing the same directory.
+ */
+function writeAtomic(path: string, data: Uint8Array): void {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, data);
+  renameSync(tmp, path);
+}
+
+function scanAndReport(opts: BakeOptions): WorldScan {
+  const scan = scanRegions(opts.world, opts.regions);
   console.log(`scanned ${scan.chunks} chunks: ${scan.states.size} states,`
     + ` ${scan.biomes.size} biomes, ${scan.entityTypes.size} entity types`);
+  return scan;
+}
+
+function stamp(): string {
+  return new Date().toISOString();
+}
+
+function main(): void {
+  const opts = readOptions();
+  console.log(`world ${opts.world}\nregions: ${opts.regions.join(', ') || '(none)'}`);
+  const watchMs = Number(arg('--watch', '0'));
+  if (!(watchMs > 0)) {
+    bake(opts, scanAndReport(opts));
+    return;
+  }
+  void watchLoop(opts, Math.max(watchMs, MIN_WATCH_MS));
+}
+
+/** A scan reads and decodes every chunk of every region; asking more often than this is noise. */
+const MIN_WATCH_MS = 5000;
+
+/**
+ * The baker. Scan, compare, bake only on a difference, sleep, repeat — for ever.
+ *
+ * The comparison is the whole point: the world changes every second (incremental chunk
+ * saves) but its INVENTORY of states changes rarely, so this loop is almost always a scan
+ * that decides nothing needs doing. Errors are logged and the loop goes on: a region
+ * caught mid-write or a jar being replaced is a reason to try again, not to stop.
+ */
+async function watchLoop(opts: BakeOptions, everyMs: number): Promise<void> {
+  console.log(`${stamp()} watching every ${everyMs} ms — baking only when the world`
+    + ' contains something the served bundle does not');
+  for (;;) {
+    try {
+      const scan = scanRegions(opts.world, opts.regions);
+      const previous = readBundle(opts.out);
+      const plan = planBake(
+        {
+          states: scan.states,
+          biomes: scan.biomes,
+          entityTypes: scan.entityTypes,
+          regions: opts.regions,
+        },
+        previous,
+      );
+      if (plan.needed) {
+        console.log(`${stamp()} re-bake: ${plan.reasons.join('; ')}`);
+        bake(opts, widen(scan, previous));
+      }
+    } catch (e) {
+      console.log(`${stamp()} bake skipped: ${(e as Error).message}`);
+    }
+    await new Promise((r) => setTimeout(r, everyMs));
+  }
+}
+
+/**
+ * In watch mode the bundle is the inventory EVER seen, not the inventory right now.
+ *
+ * Mobs spawn and despawn and turtles turn away and back; baking only what is present would
+ * drop a turtle's south-facing state the moment it turned north and bake it again when it
+ * turned back, and a bee flying through would cost two bakes. The union only ever adds, so
+ * once the world has shown the baker something it stays drawable. A one-shot bake still
+ * produces the minimal bundle for the world as it is.
+ */
+function widen(scan: WorldScan, previous: BakedAssets | null): WorldScan {
+  if (!previous) return scan;
+  return {
+    ...scan,
+    states: new Set([...scan.states, ...Object.keys(previous.states)]),
+    biomes: new Set([...scan.biomes, ...Object.keys(previous.biomes)]),
+    entityTypes: new Set([...scan.entityTypes, ...(previous.entityTypes ?? [])]),
+  };
+}
+
+function bake(opts: BakeOptions, scan: WorldScan): void {
+  const { out, regions } = opts;
+  const pack = loadPacks(opts.mods, opts.client);
+  const t0 = Date.now();
 
   const registry = new BlockRegistry(pack);
   const states = resolveAll(registry, scan.states);
@@ -225,6 +373,8 @@ function main(): void {
     regions,
     unresolved: [...registry.unresolved],
     missingSprites: atlas.missing,
+    entityTypes: [...scan.entityTypes].sort(),
+    atlasHash: createHash('sha1').update(atlas.png).digest('hex').slice(0, 12),
   };
 
   // Item icons go in their OWN files, fetched only by live mode. Folding them into the
@@ -236,15 +386,17 @@ function main(): void {
     + ` ${items.meta.missing.length} missing)`);
 
   mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, 'atlas.png'), atlas.png);
-  writeFileSync(join(out, 'items.png'), items.png);
+  // The atlas BEFORE the JSON that describes it: a reader that sees the new assets.json
+  // is then guaranteed the PNG its hash names is already on disk.
+  writeAtomic(join(out, 'atlas.png'), atlas.png);
+  writeAtomic(join(out, 'items.png'), items.png);
   const itemsJson = Buffer.from(JSON.stringify(items.meta));
-  writeFileSync(join(out, 'items.json'), itemsJson);
-  writeFileSync(join(out, 'items.json.gz'), gzipSync(new Uint8Array(itemsJson), { level: 9 }));
+  writeAtomic(join(out, 'items.json'), itemsJson);
+  writeAtomic(join(out, 'items.json.gz'), gzipSync(new Uint8Array(itemsJson), { level: 9 }));
   const json = Buffer.from(JSON.stringify(bundle));
-  writeFileSync(join(out, 'assets.json'), json);
   const gz = gzipSync(new Uint8Array(json), { level: 9 });
-  writeFileSync(join(out, 'assets.json.gz'), gz);
+  writeAtomic(join(out, 'assets.json.gz'), gz);
+  writeAtomic(join(out, 'assets.json'), json);
 
   console.log(`\nwrote ${out}/`);
   console.log(`  atlas.png       ${mb(atlas.png.length)}`);

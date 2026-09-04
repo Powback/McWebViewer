@@ -29,6 +29,12 @@ type RGB = readonly [number, number, number];
 class ServedStates implements StateSource {
   private cache = new Map<string, RenderableState>();
   readonly unresolved = new Set<string>();
+  /**
+   * Keys the bundle does not contain at all — the world gained the block after the bake.
+   * Kept apart from `unresolved` (which also holds states no jar can render) because only
+   * this set is fixed by re-baking, and it is what drives the refresh poll.
+   */
+  readonly missing = new Set<string>();
 
   constructor(private bundle: BakedAssets) {
     for (const key of bundle.unresolved) this.unresolved.add(key);
@@ -41,7 +47,10 @@ class ServedStates implements StateSource {
     const state = raw
       ? deserialiseState(stateKey, raw, this.bundle.textures)
       : missingState(stateKey);
-    if (!raw) this.unresolved.add(stateKey);
+    if (!raw) {
+      this.unresolved.add(stateKey);
+      this.missing.add(stateKey);
+    }
     this.cache.set(stateKey, state);
     return state;
   }
@@ -104,9 +113,17 @@ export interface ServedAssets {
  * uploads from — both the three.js texture and the WebGPU `copyExternalImageToTexture`
  * path take a canvas or an ImageBitmap.
  */
-async function atlasFromPng(base: string, bundle: BakedAssets): Promise<TextureAtlas> {
+async function atlasFromPng(
+  base: string,
+  bundle: BakedAssets,
+  init: RequestInit,
+): Promise<TextureAtlas> {
   const atlas = new TextureAtlas();
-  const r = await fetch(`${base}/atlas.png`);
+  // Keyed by the bundle's own hash of the PNG, so this request cannot be answered from a
+  // cache entry made for a different bake — the sprite rects below would then index the
+  // wrong pixels. Bundles from before the hash existed fall back to the plain URL.
+  const v = bundle.atlasHash ? `?v=${encodeURIComponent(bundle.atlasHash)}` : '';
+  const r = await fetch(`${base}/atlas.png${v}`, init);
   if (!r.ok) throw new Error(`atlas.png: HTTP ${r.status}`);
   const bitmap = await createImageBitmap(await r.blob());
   const canvas = typeof OffscreenCanvas !== 'undefined'
@@ -131,15 +148,21 @@ async function atlasFromPng(base: string, bundle: BakedAssets): Promise<TextureA
  * Load a baked bundle. Returns null when none is served, so the caller can fall back to
  * the jar path rather than failing — a viewer with no bake is slow, not broken.
  */
-export async function loadServedAssets(bases: readonly string[]): Promise<ServedAssets | null> {
+export async function loadServedAssets(
+  bases: readonly string[],
+  opts: { fresh?: boolean } = {},
+): Promise<ServedAssets | null> {
+  // `fresh` is for the refresh poll: it exists to find out whether the bundle CHANGED, and
+  // an answer from the HTTP cache would say "no" for as long as the cache lasts.
+  const init: RequestInit = opts.fresh ? { cache: 'no-store' } : {};
   for (const base of bases) {
-    const r = await fetch(`${base}/assets.json`).catch(() => null);
+    const r = await fetch(`${base}/assets.json`, init).catch(() => null);
     if (!r?.ok) continue;
     const bundle = (await r.json()) as BakedAssets;
     const registry = new ServedStates(bundle);
     return {
       registry,
-      atlas: await atlasFromPng(base, bundle),
+      atlas: await atlasFromPng(base, bundle, init),
       biomes: new ServedBiomes(bundle),
       regions: bundle.regions,
       stateCount: registry.size,

@@ -331,6 +331,19 @@ export class LiveView {
     return this.dirty.size;
   }
 
+  /**
+   * The atlas was replaced — a fresh bake was adopted in place — so every mesh built
+   * against the old one now samples the wrong texels: sprite rects move between bakes.
+   * Drop the cached player model and forget which players are drawn; the next frame
+   * rebuilds both from the new context. The dirty set goes too, because the caller is
+   * re-meshing the entire scene and a partial re-mesh on top of that is wasted work.
+   */
+  invalidateMeshes(): void {
+    this.playerMesh = undefined;
+    this.drawn.clear();
+    this.dirty.clear();
+  }
+
   // -------------------------------------------------------------------------
   // Players
 

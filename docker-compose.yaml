@@ -86,6 +86,11 @@ services:
       # Player position polling. Cheap: `list` plus three `data get`s per tracked player.
       MCWV_POLL_MS: "${MCWV_POLL_MS:-1000}"
       MCWV_MAX_PLAYERS: "${MCWV_MAX_PLAYERS:-10}"
+      # Live turtles. `computercraft dump` lists every loaded computer with its block
+      # position — one cheap read a second while a viewer is connected (floor 500 ms, 0 turns
+      # it off). Without it a turtle only moves on screen when its chunk is flushed and
+      # re-read, i.e. every ~5 s, and a fleet that moves 12 blocks/s looks stuck.
+      MCWV_TURTLE_MS: "${MCWV_TURTLE_MS:-1000}"
 
       # --- `save-all flush`: THE ONLY WRITE THIS SERVICE MAKES -------------------
       # Live BLOCK changes (turtles moving, pistons, redstone) need the server to write

@@ -260,6 +260,30 @@ logout at a known instant. Measured: 361 frames drawn with a **0.075-block** wor
 one name sprite while one player was drawable and zero after they left; and the follow lock
 moving the camera **7.516 blocks** while the player moved **7.516 blocks**.
 
+#### Live turtles
+
+Turtles are blocks, so until now they moved on screen only when their chunk was flushed
+and re-read — every ~5 s, then a jump. A drone that covers 24 blocks in 2 s looked stuck
+and then teleported. The bridge now also polls **`computercraft dump`** at 1 Hz
+(`MCWV_TURTLE_MS`, floor 500 ms, `0` turns it off): one cheap read-only command that lists
+every loaded computer with its block position, streamed as `{ t: 'turtles', list }` beside
+the players. It is serialised behind the roster poll on the same connection, runs only
+while a viewer is connected, and latches itself off if the server does not know the command.
+
+On screen each turtle is drawn from its own block model at the interpolated position — the
+same tracker as players, so the same one-second render delay — turning to face the way it
+moves, with a label built from the region data's block entity: `D37 #57` when the turtle
+has a label, `#57` when it does not. The region-drawn copy of any turtle that has a live
+position is hidden, so nothing is drawn twice; a turtle that drops out of the dump
+(unloaded, broken) is **held where it was last seen and marked STALE**, amber, like a lost
+player. Stationary computers get no marker: the region already draws them and they do not
+move. The HUD says `27 turtles live of 35 computers (2 STALE)`.
+
+Two limits, stated: the dump carries no dimension, so a turtle in the nether would be drawn
+at its nether coordinates in the overworld (the reference fleet is all overworld); and a
+turtle moving backwards is drawn facing its direction of travel, because heading comes
+from motion.
+
 #### Live block changes — and what they cost the server
 
 Minecraft only writes chunks to disk when it saves, so seeing a turtle move means asking

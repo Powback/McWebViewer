@@ -11,6 +11,7 @@
  * What is left is what the server can actually be asked for without installing anything:
  *
  *   players       `list` + `data get entity <name> Pos|Rotation|Dimension`, ~1 Hz
+ *   turtles       `computercraft dump`: every loaded computer's block position, ~1 Hz
  *   block changes a guarded `save-all flush`, then the browser re-reads the save files
  *
  * Both come through this socket; only the notification does, though — the world itself is
@@ -36,6 +37,26 @@ export interface FlushState {
   intervalMs: number;
   lastDurationMs: number;
   flushes: number;
+}
+
+/** One loaded computer from `computercraft dump`: its id, whether it is on, and its block. */
+export interface LiveComputer {
+  id: number;
+  on: boolean;
+  /** the block it occupies — integers */
+  pos: [number, number, number];
+}
+
+/**
+ * The bridge's turtle poll, as reported on connect. `available` is null until the first
+ * reply has been seen and false once the server said it has no such command.
+ */
+export interface TurtleState {
+  enabled: boolean;
+  available: boolean | null;
+  intervalMs: number;
+  count: number;
+  reason: string;
 }
 
 /**
@@ -68,6 +89,8 @@ export interface ObserverHooks {
   status: (msg: string) => void;
   /** the full current roster, every poll */
   onPlayers: (players: LivePlayer[]) => void;
+  /** every loaded computer's block position, each turtle poll (~1 Hz) */
+  onComputers?: (computers: LiveComputer[]) => void;
   /** the server flushed; the save files are worth re-reading */
   onReload: (info: { seq: number; tookMs: number; intervalMs: number }) => void;
   /** the bridge has said whether this browser may drive a player */
@@ -96,6 +119,7 @@ export class ObserverClient {
   connected = false;
   players: LivePlayer[] = [];
   flush: FlushState | null = null;
+  turtles: TurtleState | null = null;
   control: ControlState | null = null;
   lastReloadAt = 0;
 
@@ -131,6 +155,9 @@ export class ObserverClient {
       this.connected = false;
       this.players = [];
       this.hooks.onPlayers([]);
+      // An empty dump marks every turtle lost — held where it was, STALE — which is the
+      // truth of a dead socket. Players are dropped instead; see player-tracks.ts.
+      this.hooks.onComputers?.([]);
       if (this.closed) return;
       this.hooks.status(`bridge disconnected — retrying in ${RECONNECT_MS / 1000}s`);
       setTimeout(() => this.connect(), RECONNECT_MS);
@@ -183,6 +210,7 @@ export class ObserverClient {
   private readonly handlers: Record<string, (msg: Msg) => void> = {
     hello: (m) => {
       this.flush = (m.flush as FlushState) ?? null;
+      this.turtles = (m.turtles as TurtleState) ?? null;
       this.control = (m.control as ControlState) ?? null;
       this.hooks.onControl?.(this.control ?? DISABLED_CONTROL);
       this.hooks.status(
@@ -223,8 +251,8 @@ export class ObserverClient {
     // The bridge could not read the roster at all. Without this the browser sees only an
     // absence of messages, which is indistinguishable from an idle server.
     pollError: (m) => this.hooks.status(
-      `live: the bridge's player poll is failing (${Number(m.failures) || 1} in a row):` +
-        ` ${String(m.message)} — the players on screen are STALE`,
+      `live: the bridge's ${String(m.scope ?? 'player').replace(/s$/, '')} poll is failing` +
+        ` (${Number(m.failures) || 1} in a row): ${String(m.message)} — what it reports is STALE on screen`,
     ),
     self: (m) => {
       const pos = m.pos as [number, number, number];
@@ -243,6 +271,13 @@ export class ObserverClient {
       from: typeof m.from === 'string' ? m.from : null,
       text: String(m.text ?? ''),
     }),
+    turtles: (m) => {
+      const { computers, rejected } = readComputers(m.list);
+      if (rejected) {
+        this.hooks.status(`live: ${rejected} unusable computer record(s) in this poll — NOT drawn`);
+      }
+      this.hooks.onComputers?.(computers);
+    },
     reload: (m) => {
       this.lastReloadAt = performance.now();
       if (this.flush) {
@@ -296,6 +331,26 @@ export function readPlayers(raw: unknown): { players: LivePlayer[]; rejected: nu
     });
   }
   return { players, rejected };
+}
+
+/**
+ * The `turtles` payload, checked field by field. A computer at a non-integer or NaN block
+ * is not a computer we can place, and is counted rather than drawn somewhere plausible.
+ */
+export function readComputers(raw: unknown): { computers: LiveComputer[]; rejected: number } {
+  if (!Array.isArray(raw)) return { computers: [], rejected: 0 };
+  const computers: LiveComputer[] = [];
+  let rejected = 0;
+  for (const e of raw as Array<Record<string, unknown>>) {
+    const id = Number(e.id);
+    const pos = [Number(e.x), Number(e.y), Number(e.z)] as [number, number, number];
+    if (!Number.isInteger(id) || id < 0 || !pos.every(Number.isInteger)) {
+      rejected++;
+      continue;
+    }
+    computers.push({ id, on: e.on === true, pos });
+  }
+  return { computers, rejected };
 }
 
 const DISABLED_CONTROL: ControlState = {

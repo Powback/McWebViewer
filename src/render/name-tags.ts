@@ -83,6 +83,8 @@ export class NameTags {
     private scene: THREE.Scene,
     /** Injected so the geometry can be exercised without a DOM. */
     private makeCanvas: () => HTMLCanvasElement = () => document.createElement('canvas'),
+    /** How far above `pos` the label floats: a player is 1.8 blocks tall, a turtle is one. */
+    private lift: number = TAG_LIFT,
   ) {}
 
   /**
@@ -106,7 +108,7 @@ export class NameTags {
 
   private place(tag: Tag, pose: TrackPose, camera: THREE.Camera): void {
     const x = pose.pos[0];
-    const y = pose.pos[1] + TAG_LIFT;
+    const y = pose.pos[1] + this.lift;
     const z = pose.pos[2];
     tag.sprite.position.set(x, y, z);
     const d = camera.position.distanceTo(tag.sprite.position);

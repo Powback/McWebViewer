@@ -119,10 +119,25 @@ const MAX_YAW_RATE = 540;
  */
 const SNAP_BLOCKS = 4;
 
+/**
+ * How a track that the roster stops listing is treated.
+ *
+ * A PLAYER who leaves the roster logged out: the track plays out its last second and is
+ * dropped. A TURTLE that leaves `computercraft dump` was unloaded or broken — it is still,
+ * as far as anyone knows, where it was last seen, and the only honest thing to draw is that
+ * position, held exactly (no dead reckoning past a reading known to be the last) and marked
+ * STALE. `holdLost` selects the second behaviour.
+ */
+export interface TrackOptions {
+  holdLost?: boolean;
+}
+
 interface Track {
   samples: TrackSample[];
   /** local clock at which the roster stopped listing this player, or null while online */
   departedAt: number | null;
+  /** with `holdLost`: when the roster stopped listing this track, or null while listed */
+  lostAt: number | null;
   /** the eased position actually drawn, null until the first pose is produced */
   rendered: [number, number, number] | null;
   renderedYaw: number;
@@ -143,7 +158,7 @@ export class PlayerTracks {
    */
   readonly unknownDimension = new Set<string>();
 
-  constructor(private drawnDimension: string) {}
+  constructor(private drawnDimension: string, private opts: TrackOptions = {}) {}
 
   /** How far behind live the poses are, in ms. Report this; do not hide it. */
   get delayMs(): number {
@@ -183,7 +198,12 @@ export class PlayerTracks {
     // `poses` play it out; deleting here would make everyone vanish a second early and, at
     // 1 Hz, a second early is halfway across a room.
     for (const [name, track] of this.tracks) {
-      if (!seen.has(name) && track.departedAt === null) track.departedAt = now;
+      if (seen.has(name)) continue;
+      if (this.opts.holdLost) {
+        if (track.lostAt === null) track.lostAt = now;
+      } else if (track.departedAt === null) {
+        track.departedAt = now;
+      }
     }
   }
 
@@ -202,6 +222,7 @@ export class PlayerTracks {
     const track = this.tracks.get(entry.name) ?? newTrack();
     this.tracks.set(entry.name, track);
     track.departedAt = null;
+    track.lostAt = null;
     const sample: TrackSample = {
       pos: entry.pos,
       yawDeg: entry.yawDeg,
@@ -285,7 +306,7 @@ function chase(track: Track, target: Target, dt: number): void {
 }
 
 function newTrack(): Track {
-  return { samples: [], departedAt: null, rendered: null, renderedYaw: 0 };
+  return { samples: [], departedAt: null, lostAt: null, rendered: null, renderedYaw: 0 };
 }
 
 /**
@@ -329,6 +350,9 @@ function sampleAt(track: Track, renderAt: number): Target | null {
   if (!s.length) return null;
   const newest = s[s.length - 1];
   if (track.departedAt !== null && renderAt > newest.at) return null;
+  // Lost, not departed: the last reading is the last thing known. Hold it exactly — no
+  // dead reckoning past a sample we know nothing followed — and let `stale` say so.
+  if (track.lostAt !== null && renderAt > newest.at) return still(newest);
   // Before the buffer starts: a player who just appeared. Hold them at their first known
   // position rather than reaching backwards for a history that does not exist.
   if (renderAt <= s[0].at) return still(s[0]);

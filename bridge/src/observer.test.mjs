@@ -64,7 +64,7 @@ function scriptedServer(reply) {
 }
 
 /** Run one observer against a scripted server until `done(messages)` is satisfied. */
-async function observe(reply, done, { timeoutMs = 4000 } = {}) {
+async function observe(reply, done, { timeoutMs = 4000, turtleMs = 0 } = {}) {
   const { server, commands } = scriptedServer(reply);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
@@ -75,6 +75,9 @@ async function observe(reply, done, { timeoutMs = 4000 } = {}) {
       port,
       password: 'x',
       pollMs: 50,
+      // Off unless a test asks: the scripts above answer player commands only, and a dump
+      // answered with player NBT is (correctly) a reported failure.
+      turtleMs,
       flushEnabled: false,
       fakePlayerEnabled: false,
       log: () => {},
@@ -194,4 +197,48 @@ test('an ordinary poll emits the roster and reports nothing', async () => {
   }]);
   assert.equal(has(messages, 'pollError').length, 0);
   assert.equal(said(messages, 'could not read'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Turtles: `computercraft dump` on the same connection, at its own cadence.
+
+const DUMP = [
+  'Computer | On | Position',
+  '==============================',
+  '#57      | Y  | -466, 63, 30',
+  '#62      | N  | -480, 64, 75',
+].join('\n');
+
+test('turtles: the dump is polled while a viewer is connected and streamed as `turtles`', async () => {
+  const reply = (cmd) => {
+    if (cmd === 'list') return listing();
+    if (cmd === 'computercraft dump') return DUMP;
+    return '';
+  };
+  const { messages, commands } = await observe(
+    reply, (m) => has(m, 'turtles').length >= 2, { turtleMs: 500 },
+  );
+  assert.deepEqual(has(messages, 'turtles').at(-1).list, [
+    { id: 57, on: true, x: -466, y: 63, z: 30 },
+    { id: 62, on: false, x: -480, y: 64, z: 75 },
+  ]);
+  assert.ok(commands.filter((c) => c === 'computercraft dump').length >= 2);
+  assert.equal(has(messages, 'pollError').length, 0);
+  // The hello a browser gets on connect carries the poller's state.
+  assert.equal(has(messages, 'hello').at(-1).turtles.enabled, true);
+  assert.equal(has(messages, 'hello').at(-1).turtles.intervalMs, 500);
+});
+
+test('turtles: a server without CC:T is asked exactly once, then left alone', async () => {
+  const reply = (cmd) => {
+    if (cmd === 'list') return listing();
+    if (cmd === 'computercraft dump') return 'Unknown or incomplete command, see below for error';
+    return '';
+  };
+  const { messages, commands } = await observe(
+    reply, (m) => has(m, 'players').length >= 6, { turtleMs: 500 },
+  );
+  assert.equal(commands.filter((c) => c === 'computercraft dump').length, 1);
+  assert.ok(said(messages, 'live turtles unavailable'));
+  assert.equal(has(messages, 'turtles').length, 0);
 });

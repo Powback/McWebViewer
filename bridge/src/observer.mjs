@@ -1,13 +1,14 @@
 /**
  * The live tier: a READ-ONLY observer of a running Minecraft server.
  *
- * It issues exactly three kinds of command, all of them over RCON:
+ * It issues exactly four kinds of command, all of them over RCON:
  *
  *   list                                  who is online
  *   data get entity <name> Pos|Rotation|Dimension    where they are
+ *   computercraft dump                    where every loaded computer (turtle) is
  *   save-all flush                        ask the server to write changed chunks to disk
  *
- * The first two are pure reads. The third is a write, and it is the only one — it is
+ * The first three are pure reads. The fourth is a write, and it is the only one — it is
  * guarded hard by FlushTimer (off by default, only while a viewer is connected, floored
  * at 2 s, self-backing-off). See flush-timer.mjs for why that guard is not optional.
  *
@@ -26,6 +27,7 @@ import { RconClient } from './rcon.mjs';
 import { FlushTimer } from './flush-timer.mjs';
 import { FakePlayer } from './fake-player.mjs';
 import { ChatLog } from './chat-log.mjs';
+import { TURTLE_DEFAULT_MS, TurtlePoller } from './computers.mjs';
 import { readBlock, readInventory, readPos, readRotation, readVitals } from './player-state.mjs';
 import {
   isValidPlayerName, parseDimension, parsePlayerList, parsePos, parseRotation,
@@ -125,6 +127,15 @@ export class Observer {
       run: (cmd) => this.#runControl(cmd),
       log: (m) => this.log(m),
     });
+    // Turtles by `computercraft dump`, about once a second while somebody is watching. It
+    // runs on the observe connection, serialised behind the roster poll like every other
+    // read here, and owns its own guards — see computers.mjs.
+    this.turtles = new TurtlePoller({
+      intervalMs: opts.turtleMs ?? TURTLE_DEFAULT_MS,
+      run: (cmd) => this.#run(cmd),
+      emit: (m) => this.emit(m),
+      log: (m) => this.log(m),
+    });
   }
 
   get ready() {
@@ -157,6 +168,7 @@ export class Observer {
       // mod produces a viewer with no controls rather than controls that do nothing.
       control: this.fakePlayer.status(),
       chat: { available: !!this.chatLog?.available },
+      turtles: this.turtles.status(),
     };
   }
 
@@ -183,6 +195,7 @@ export class Observer {
     // flush timer stopped while somebody is still watching.
     this.flushTimer.setClients(this.#clients);
     void this.#pollLoop();
+    void this.#turtleLoop();
   }
 
   #onDisconnect() {
@@ -203,6 +216,7 @@ export class Observer {
     if (n > 0 && this.ready) {
       void this.#pollLoop();
       void this.#selfLoop();
+      void this.#turtleLoop();
     }
     // Nobody is watching any more; do not leave a bot standing in the world.
     if (n === 0) void this.fakePlayer.leave().then(() => this.#announceControl());
@@ -337,6 +351,15 @@ export class Observer {
     this.pollFailures = 0;
     this.log(`player poll recovered after ${n} failure(s)`);
     this.emit({ t: 'status', message: `player poll recovered after ${n} failure(s)` });
+  }
+
+  /**
+   * Turtles at ~1 Hz on the same serialised connection. The poller owns its guards (floor,
+   * no overlap, latch-off on an unknown command, failures reported); this only tells it
+   * when somebody is watching — the condition that gates every other poll here.
+   */
+  #turtleLoop() {
+    return this.turtles.loop(() => !this.#stopped && this.ready && this.#clients > 0);
   }
 
   /**

@@ -697,6 +697,32 @@ nearest-first by the same streaming mesher that loaded the page. No reload, so t
 and a driven bot survive. The atlas is fetched as `atlas.png?v=<hash>` so an HTTP cache
 cannot pair a new bundle with an old PNG.
 
+#### Turtles: the same tracker, fed by `computercraft dump`
+
+A turtle is a block entity, and the live-blocks path above moves it only when its chunk is
+flushed and re-read — five seconds of nothing, then a jump, for a machine that covers 24
+blocks in two seconds. CC:T's own `/computercraft dump` prints every loaded computer's id,
+on-flag and block position as a console table; the bridge polls it once a second
+(`bridge/src/computers.mjs`), on the observe connection behind the roster poll, floored at
+500 ms, only while a viewer is connected, and latched off the first time the server says it
+has no such command. Its rows are the only thing parsed; nothing is written.
+
+The browser joins that stream to the region data by computer id
+(`src/app/computer-registry.ts`): the block entity says kind (turtle vs stationary
+computer), label and saved block; the dump says where it is now. Turtles go through
+`PlayerTracks` with `holdLost`, so they interpolate with the same one-second delay as
+players, and a turtle that leaves the dump is held exactly where it was and marked STALE
+rather than dropped. Each is drawn from its own block model (`meshBlockSet`, built about the
+block's bottom centre so heading rotates it in place), facing its last horizontal step,
+labelled `D37 #57`. Its region-drawn block is hidden through `MeshContext.hidden` — section
+key and block index, the mesher's own units — and the affected sections re-meshed, so no
+turtle is ever on screen twice.
+
+Found on the way: vanilla RCON splits a reply longer than 4096 bytes into several packets
+with the same id and no terminator, and the client resolved on the first. A large fleet's
+dump would have been silently cut at the first packet; `RconClient` now treats a full
+packet as "more follows".
+
 #### Drawing the players you can see: latency bought accuracy
 
 The roster arrives at 1 Hz and the first version drew it where it landed. That is not a

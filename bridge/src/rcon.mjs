@@ -19,6 +19,8 @@ const noop = () => {};
 const TYPE_AUTH = 3;
 const TYPE_EXEC = 2;
 const TYPE_RESPONSE = 0;
+/** Vanilla's per-packet body limit; a reply this long continues in the next packet. */
+const MAX_PACKET_BODY = 4096;
 
 export class RconClient {
   #socket = null;
@@ -117,6 +119,7 @@ export class RconClient {
         if (this.#pending.delete(id)) reject(new Error(`rcon timeout: ${body.slice(0, 40)}`));
       }, 8000);
       this.#pending.set(id, {
+        chunks: [],
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
       });
@@ -145,8 +148,14 @@ export class RconClient {
       }
       const waiter = this.#pending.get(id);
       if (waiter) {
+        // Vanilla splits a long reply into 4096-byte packets that share the request id and
+        // carry no end marker (`RconClient.sendCmdResponse`). A packet that is exactly full
+        // is therefore "more follows"; the reply is whole at the first short one. Without
+        // this a `computercraft dump` of a large fleet was silently cut at the first packet.
+        waiter.chunks.push(body);
+        if (Buffer.byteLength(body, 'utf8') >= MAX_PACKET_BODY) continue;
         this.#pending.delete(id);
-        waiter.resolve(body);
+        waiter.resolve(waiter.chunks.join(''));
       } else if (type === TYPE_RESPONSE) {
         this.onLog?.(body);
       }

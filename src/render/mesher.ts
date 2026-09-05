@@ -43,7 +43,7 @@ export interface StateSource {
 export interface TintLookup {
   tint(biomeId: string, source: 0 | 1 | 2): readonly [number, number, number];
 }
-import { AIR_ID, World } from './world.js';
+import { AIR_ID, World, type StoredSection } from './world.js';
 import { SECTION_VOLUME } from '../core/chunk.js';
 
 type Vec3 = [number, number, number];
@@ -212,6 +212,13 @@ export interface MeshContext {
    * vertex data to whichever shaderpack is loaded — see SHADERPACKS.md §7.
    */
   blockIdOf?: (stateKey: string) => number;
+  /**
+   * Blocks to leave out of the mesh: section key (`cx,cy,cz`) -> block indices within
+   * that section, in this file's iteration order. Live mode uses it to hide the
+   * region-drawn block of a turtle whose real position arrives over the bridge, so the
+   * turtle is drawn once — where it is — and not also where the last flush left it.
+   */
+  hidden?: ReadonlyMap<string, ReadonlySet<number>>;
 }
 
 export function makeContext(
@@ -422,6 +429,19 @@ function emitBlock(ctx: MeshContext, b: BlockCtx, getBuilder: (l: Layer) => Laye
   return written;
 }
 
+const NO_HIDDEN: ReadonlySet<number> = new Set();
+
+/** The live view's hidden blocks for this section, or none. */
+function hiddenIn(ctx: MeshContext, cx: number, cy: number, cz: number): ReadonlySet<number> {
+  return ctx.hidden?.get(`${cx},${cy},${cz}`) ?? NO_HIDDEN;
+}
+
+/** The block at index `i` of a section, with a hidden block reading as air. */
+function blockIdAt(section: StoredSection, hidden: ReadonlySet<number>, i: number): number {
+  if (hidden.has(i)) return AIR_ID;
+  return section.ids ? section.ids[i] : section.uniform;
+}
+
 export function meshSection(
   ctx: MeshContext,
   cx: number,
@@ -440,9 +460,11 @@ export function meshSection(
   const baseY = cy << 4;
   const baseZ = cz << 4;
   let quadCount = 0;
+  // Looked up once per section, not once per block: almost every section has nothing hidden.
+  const hiddenHere = hiddenIn(ctx, cx, cy, cz);
 
   for (let i = 0; i < SECTION_VOLUME; i++) {
-    const id = section.ids ? section.ids[i] : section.uniform;
+    const id = blockIdAt(section, hiddenHere, i);
     if (id === AIR_ID) continue;
     const state = stateOf(ctx, id);
     if (!state.quads.length) continue;

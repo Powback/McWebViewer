@@ -120,3 +120,45 @@ test('commands are refused when not authenticated rather than queued forever', a
   const client = new RconClient({ host: '127.0.0.1', port: 1, password: 'x' });
   await assert.rejects(() => client.command('list'), /not authenticated/);
 });
+
+/**
+ * Vanilla splits a long reply into 4096-byte packets with the same request id and no end
+ * marker. A client that resolves on the first packet returns a truncated reply — which is a
+ * `computercraft dump` missing its last turtles, with nothing to say they are gone.
+ */
+test('a reply split across full packets is reassembled; a short packet ends it', async () => {
+  const long = 'x'.repeat(4096 * 2 + 17);
+  const server = net.createServer((sock) => {
+    let buf = Buffer.alloc(0);
+    sock.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 4 && buf.length >= buf.readInt32LE(0) + 4) {
+        const len = buf.readInt32LE(0);
+        const id = buf.readInt32LE(4);
+        const type = buf.readInt32LE(8);
+        buf = buf.subarray(4 + len);
+        if (type === 3) {
+          sock.write(frame(id, TYPE_AUTH_RESPONSE, ''));
+          continue;
+        }
+        // Exactly what the server does: 4096-byte slices, same id, last one short.
+        let rest = long;
+        while (rest.length) {
+          sock.write(frame(id, TYPE_RESPONSE, rest.slice(0, 4096)));
+          rest = rest.slice(4096);
+        }
+      }
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const client = new RconClient({ host: '127.0.0.1', port: server.address().port, password: 'x' });
+  try {
+    await client.connect();
+    assert.equal(await client.command('computercraft dump'), long);
+    // And a second command on the same connection still gets its own, whole answer.
+    assert.equal(await client.command('again'), long);
+  } finally {
+    client.close();
+    await new Promise((r) => server.close(r));
+  }
+});

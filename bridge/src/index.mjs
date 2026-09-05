@@ -31,6 +31,8 @@
  *                                  environment and never logged or sent to the browser.
  *   MCWV_POLL_MS         player poll cadence (default 1000, floor 500)
  *   MCWV_MAX_PLAYERS     cap on players polled per tick (default 10)
+ *   MCWV_TURTLE_MS       `computercraft dump` cadence for live turtles (default 1000,
+ *                        floor 500, 0 = off). One read a second; see computers.mjs.
  *   MCWV_FLUSH_ENABLE    '1' to allow `save-all flush` at all. DEFAULT OFF.
  *   MCWV_FLUSH_MS        flush cadence (default 5000, HARD FLOOR 2000)
  *   MCWV_FLUSH_SLOW_MS   a flush slower than this backs the cadence off (default 1000)
@@ -56,6 +58,7 @@ const CONFIG = {
   password: process.env.MCWV_RCON_PASSWORD ?? '',
   pollMs: Number(process.env.MCWV_POLL_MS ?? 1000),
   maxTracked: Number(process.env.MCWV_MAX_PLAYERS ?? 10),
+  turtleMs: Number(process.env.MCWV_TURTLE_MS ?? 1000),
   // Off unless explicitly turned on. This is the switch that decides whether a live
   // server's tick budget gets spent on the viewer at all.
   flushEnabled: process.env.MCWV_FLUSH_ENABLE === '1',
@@ -109,6 +112,7 @@ const observer = new Observer(
     password: CONFIG.password,
     pollMs: CONFIG.pollMs,
     maxTracked: CONFIG.maxTracked,
+    turtleMs: CONFIG.turtleMs,
     flushEnabled: CONFIG.flushEnabled,
     flushMs: CONFIG.flushMs,
     flushSlowMs: CONFIG.flushSlowMs,
@@ -161,6 +165,9 @@ log(`observer bridge listening on :${CONFIG.wsPort}`);
 log(`rcon target ${CONFIG.host}:${CONFIG.port}`);
 log(describeFlush());
 log(describeControl());
+log(observer.turtles.enabled
+  ? `turtles: polling \`computercraft dump\` every ${observer.turtles.intervalMs} ms while a viewer is connected`
+  : 'turtles: DISABLED (MCWV_TURTLE_MS=0) — turtles move only when their chunk is flushed and re-read');
 log(CONFIG.chatLogPath
   ? `chat: reading ${CONFIG.chatLogPath} (read-only)`
   : 'chat: receive DISABLED (set MCWV_CHAT_LOG to the server\'s latest.log)');

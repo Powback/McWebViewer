@@ -33,6 +33,9 @@
  *   MCWV_MAX_PLAYERS     cap on players polled per tick (default 10)
  *   MCWV_TURTLE_MS       `computercraft dump` cadence for live turtles (default 1000,
  *                        floor 500, 0 = off). One read a second; see computers.mjs.
+ *   MCWV_HQ_URL          the settlement brain, for turtle activity labels (default
+ *                        http://hq:4400 on the Minecraft compose network; empty = off)
+ *   MCWV_HQ_MS           HQ label poll cadence (default 1000, floor 500, 0 = off)
  *   MCWV_FLUSH_ENABLE    '1' to allow `save-all flush` at all. DEFAULT OFF.
  *   MCWV_FLUSH_MS        flush cadence (default 5000, HARD FLOOR 2000)
  *   MCWV_FLUSH_SLOW_MS   a flush slower than this backs the cadence off (default 1000)
@@ -59,6 +62,10 @@ const CONFIG = {
   pollMs: Number(process.env.MCWV_POLL_MS ?? 1000),
   maxTracked: Number(process.env.MCWV_MAX_PLAYERS ?? 10),
   turtleMs: Number(process.env.MCWV_TURTLE_MS ?? 1000),
+  // The settlement brain, for turtle activity labels. An empty URL turns labels off; the
+  // turtle positions still stream. See hq.mjs.
+  hqUrl: process.env.MCWV_HQ_URL ?? 'http://hq:4400',
+  hqMs: process.env.MCWV_HQ_URL === '' ? 0 : Number(process.env.MCWV_HQ_MS ?? 1000),
   // Off unless explicitly turned on. This is the switch that decides whether a live
   // server's tick budget gets spent on the viewer at all.
   flushEnabled: process.env.MCWV_FLUSH_ENABLE === '1',
@@ -113,6 +120,8 @@ const observer = new Observer(
     pollMs: CONFIG.pollMs,
     maxTracked: CONFIG.maxTracked,
     turtleMs: CONFIG.turtleMs,
+    hqUrl: CONFIG.hqUrl,
+    hqMs: CONFIG.hqMs,
     flushEnabled: CONFIG.flushEnabled,
     flushMs: CONFIG.flushMs,
     flushSlowMs: CONFIG.flushSlowMs,
@@ -168,6 +177,9 @@ log(describeControl());
 log(observer.turtles.enabled
   ? `turtles: polling \`computercraft dump\` every ${observer.turtles.intervalMs} ms while a viewer is connected`
   : 'turtles: DISABLED (MCWV_TURTLE_MS=0) — turtles move only when their chunk is flushed and re-read');
+log(observer.hq.enabled
+  ? `turtle labels: polling HQ ${observer.hq.url}/invoke every ${observer.hq.intervalMs} ms (fleet.status)`
+  : 'turtle labels: DISABLED (set MCWV_HQ_URL) — turtles show their id with no activity');
 log(CONFIG.chatLogPath
   ? `chat: reading ${CONFIG.chatLogPath} (read-only)`
   : 'chat: receive DISABLED (set MCWV_CHAT_LOG to the server\'s latest.log)');

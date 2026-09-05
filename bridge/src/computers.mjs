@@ -76,6 +76,9 @@ export class TurtlePoller {
    * @param {number}  opts.intervalMs  poll cadence; 0 or NaN disables; floored at 500 ms
    * @param {(cmd: string) => Promise<string>} opts.run  the serialised RCON command runner
    * @param {(msg: object) => void} opts.emit  broadcast to every browser
+   * @param {(id: number) => ({ name?: string|null, label?: string|null }|null)} [opts.labelFor]
+   *        activity label for one computer id, from HQ. Folded into each emitted row so the
+   *        browser gets "where" and "what" in one message; null when HQ has nothing for it.
    * @param {(msg: string) => void} [opts.log]
    * @param {(ms: number) => Promise<void>} [opts.sleep]  injected for tests
    */
@@ -85,6 +88,7 @@ export class TurtlePoller {
     this.intervalMs = this.enabled ? Math.max(TURTLE_FLOOR_MS, ms) : 0;
     this.run = opts.run;
     this.emit = opts.emit;
+    this.labelFor = opts.labelFor ?? (() => null);
     this.log = opts.log ?? (() => {});
     this.sleep = opts.sleep ?? ((t) => new Promise((r) => setTimeout(r, t)));
     /** null until the first reply has been seen; false once the server said no. */
@@ -154,9 +158,20 @@ export class TurtlePoller {
     this.available = true;
     this.polls++;
     this.count = computers.length;
-    this.last = computers;
+    const list = computers.map((c) => this.#withLabel(c));
+    this.last = list;
     this.#recovered();
-    this.emit({ t: 'turtles', list: computers, at: Date.now() });
+    this.emit({ t: 'turtles', list, at: Date.now() });
+  }
+
+  /** Fold HQ's name and activity line into one row, leaving them off when HQ has none. */
+  #withLabel(computer) {
+    const l = this.labelFor(computer.id);
+    if (!l) return computer;
+    const row = { ...computer };
+    if (l.name != null) row.name = l.name;
+    if (l.label != null) row.label = l.label;
+    return row;
   }
 
   /** Same reporting rhythm as the roster poll: every failure logged, the browser told on the first and every tenth. */

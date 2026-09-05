@@ -13,7 +13,7 @@ import type { ChunkColumn } from '../render/world.js';
 import type { NbtCompound } from '../core/nbt.js';
 import {
   ComputerRegistry, blockIndexOf, changedSections, classifyBlockEntity, facingYawDeg,
-  headingYawDeg, sectionKeyOf, turtleIdOf, turtleKey,
+  headingYawDeg, sectionKeyOf, turtleIdOf, turtleKey, turtleTagText,
 } from './computer-registry.js';
 
 /** A column holding just the given block entities; nothing else is read. */
@@ -104,6 +104,24 @@ test('facing and heading share one convention: north 0, west 90, south 180, east
 test('tracker keys round-trip the id and never change with the label', () => {
   assert.equal(turtleKey(57), '#57');
   assert.equal(turtleIdOf('#57'), 57);
+});
+
+test('the turtle tag reads name then activity, id only when there is no name', () => {
+  assert.equal(turtleTagText('D37', 57, 'fetching wood'), 'D37 · fetching wood');
+  assert.equal(turtleTagText('D37', 57, null), 'D37', 'name, no activity');
+  assert.equal(turtleTagText(null, 57, 'depositing'), '#57 · depositing', 'activity, no name');
+  assert.equal(turtleTagText(null, 57, null), '#57', 'nothing but the dump');
+  assert.equal(turtleTagText('D37', 57, '   '), 'D37', 'blank activity is no activity');
+});
+
+test('a long activity line is truncated with an ellipsis', () => {
+  const long = 'searching 6 chest(s) for stone_bricks';
+  const tag = turtleTagText('D37', 57, long, 28);
+  assert.ok(tag.startsWith('D37 · searching 6 chest'), tag);
+  assert.ok(tag.endsWith('…'));
+  // "D37 · " + at most 28 chars of activity.
+  assert.ok(tag.length <= 'D37 · '.length + 28, `too long: ${tag}`);
+  assert.equal(turtleTagText('D37', 57, 'fetching wood', 28), 'D37 · fetching wood', 'short lines are untouched');
 });
 
 test('changedSections names every section whose hidden set differs, and nothing else', () => {

@@ -93,6 +93,13 @@ services:
       # it off). Without it a turtle only moves on screen when its chunk is flushed and
       # re-read, i.e. every ~5 s, and a fleet that moves 12 blocks/s looks stuck.
       MCWV_TURTLE_MS: "${MCWV_TURTLE_MS:-1000}"
+      # Turtle ACTIVITY labels come from the settlement brain (HQ), not RCON: `computercraft
+      # dump` says where a turtle is, HQ says what it is doing. HQ lives on this same
+      # network as `hq:4400`; the bridge polls its `fleet.status` once a second in parallel
+      # with the dump and folds each drone's name + free-text line into the turtle stream.
+      # Empty MCWV_HQ_URL turns labels off; turtle positions still stream.
+      MCWV_HQ_URL: "${MCWV_HQ_URL:-http://hq:4400}"
+      MCWV_HQ_MS: "${MCWV_HQ_MS:-1000}"
 
       # --- `save-all flush`: THE ONLY WRITE THIS SERVICE MAKES -------------------
       # Live BLOCK changes (turtles moving, pistons, redstone) need the server to write
@@ -140,6 +147,7 @@ services:
     networks:
       - default
       - minecraft
+      - hq
 
 networks:
   traefik:
@@ -149,3 +157,10 @@ networks:
   minecraft:
     external: true
     name: minecraft-create121_default
+  # HQ's own compose network, where the settlement brain answers as `hq:4400`. The bridge
+  # joins it to read turtle activity labels — a change to THIS container only; nothing
+  # about the HiveMind stack is touched. (HQ lives on hq_default + traefik, NOT on the
+  # Minecraft network, so `hq:4400` is only reachable from here.)
+  hq:
+    external: true
+    name: hq_default

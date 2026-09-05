@@ -23,7 +23,7 @@ import type { Viewer } from '../render/viewer.js';
 import type { ChunkColumn, World } from '../render/world.js';
 import { meshBlockSet, type BlockSetMesh } from '../render/entities.js';
 import {
-  ComputerRegistry, changedSections, headingYawDeg, turtleIdOf, turtleKey,
+  ComputerRegistry, changedSections, headingYawDeg, turtleIdOf, turtleKey, turtleTagText,
 } from './computer-registry.js';
 import {
   buildEntityQuads, entityYawDeg, meshEntityQuads, type EntityMesh, type EntityModelSet,
@@ -133,6 +133,8 @@ export class LiveView {
   private lastTurtlePoses: TrackPose[] = [];
   /** Region-drawn turtle blocks hidden because their computer has a live track; see mesher.ts. */
   private hidden: ReadonlyMap<string, ReadonlySet<number>> = new Map();
+  /** HQ's name and activity line per computer id — what the drone is DOING, not where. */
+  private hqLabels = new Map<number, { name: string | null; activity: string | null }>();
 
   /** Counters the HUD reports, so "it is connected" and "it is working" stay separable. */
   readonly stats = { chunksChanged: 0, sectionsRemeshed: 0, syncMs: 0, players: 0, computers: 0 };
@@ -426,17 +428,45 @@ export class LiveView {
     this.stats.computers = list.length;
     const roster: RosterEntry[] = [];
     for (const c of list) {
+      this.noteHqLabel(c);
       if (this.computers.kindOf(c.id) === 'computer') continue;
-      const prev = this.liveHeading.get(c.id);
-      const yaw = headingYawDeg(prev?.pos, c.pos)
-        ?? prev?.yaw
-        ?? this.computers.get(c.id)?.facingYawDeg
-        ?? 0;
-      this.liveHeading.set(c.id, { pos: c.pos, yaw });
-      roster.push({ name: turtleKey(c.id), pos: c.pos, yawDeg: yaw, dimension: DRAWN_DIMENSION });
+      roster.push({
+        name: turtleKey(c.id),
+        pos: c.pos,
+        yawDeg: this.headingFor(c),
+        dimension: DRAWN_DIMENSION,
+      });
     }
     this.turtleTracks.ingest(roster, performance.now());
     this.refreshHidden();
+  }
+
+  /**
+   * Keep HQ's last-known name and activity for a computer. The bridge sends them every
+   * tick, so a tick that omitted them (HQ briefly unreachable) must not blank a tag that
+   * had one — hence the fall back to what was stored.
+   */
+  private noteHqLabel(c: LiveComputer): void {
+    if (!c.name && !c.label) return;
+    const prev = this.hqLabels.get(c.id);
+    this.hqLabels.set(c.id, {
+      name: c.name ?? prev?.name ?? null,
+      activity: c.label ?? prev?.activity ?? null,
+    });
+  }
+
+  /**
+   * A turtle's heading: its last horizontal step, else the heading it kept (vertical move),
+   * else its saved block's facing, else north. Stored so a vertical-only move holds facing.
+   */
+  private headingFor(c: LiveComputer): number {
+    const prev = this.liveHeading.get(c.id);
+    const yaw = headingYawDeg(prev?.pos, c.pos)
+      ?? prev?.yaw
+      ?? this.computers.get(c.id)?.facingYawDeg
+      ?? 0;
+    this.liveHeading.set(c.id, { pos: c.pos, yaw });
+    return yaw;
   }
 
   /** One frame of turtles: interpolate, draw, label. Called from `updatePlayers`. */
@@ -449,8 +479,18 @@ export class LiveView {
     this.drawTurtles(poses);
     this.labelWith(
       this.turtleTags,
-      poses.map((p) => ({ ...p, name: this.computers.labelFor(turtleIdOf(p.name)) })),
+      poses.map((p) => ({ ...p, name: this.turtleTag(turtleIdOf(p.name)) })),
     );
+  }
+
+  /**
+   * The tag for one turtle: HQ's name and activity when it has them, the region label or id
+   * otherwise. `D37 · fetching wood`, `D4 · depositing`, `#57` for a drone HQ does not list.
+   */
+  private turtleTag(id: number): string {
+    const hq = this.hqLabels.get(id);
+    const name = hq?.name ?? this.computers.get(id)?.label ?? null;
+    return turtleTagText(name, id, hq?.activity ?? null);
   }
 
   private drawTurtles(poses: readonly TrackPose[]): void {

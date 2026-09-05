@@ -28,6 +28,7 @@ import { FlushTimer } from './flush-timer.mjs';
 import { FakePlayer } from './fake-player.mjs';
 import { ChatLog } from './chat-log.mjs';
 import { TURTLE_DEFAULT_MS, TurtlePoller } from './computers.mjs';
+import { HqPoller } from './hq.mjs';
 import { readBlock, readInventory, readPos, readRotation, readVitals } from './player-state.mjs';
 import {
   isValidPlayerName, parseDimension, parsePlayerList, parsePos, parseRotation,
@@ -127,13 +128,22 @@ export class Observer {
       run: (cmd) => this.#runControl(cmd),
       log: (m) => this.log(m),
     });
+    // What each turtle is DOING, from the settlement brain — polled in parallel with the
+    // dump, off the docker network, never blocking the turtle stream. See hq.mjs.
+    this.hq = new HqPoller({
+      intervalMs: opts.hqMs,
+      url: opts.hqUrl,
+      log: (m) => this.log(m),
+    });
     // Turtles by `computercraft dump`, about once a second while somebody is watching. It
     // runs on the observe connection, serialised behind the roster poll like every other
-    // read here, and owns its own guards — see computers.mjs.
+    // read here, and owns its own guards — see computers.mjs. Each row is decorated with
+    // HQ's name and activity line at emit time, so "where" and "what" arrive together.
     this.turtles = new TurtlePoller({
       intervalMs: opts.turtleMs ?? TURTLE_DEFAULT_MS,
       run: (cmd) => this.#run(cmd),
       emit: (m) => this.emit(m),
+      labelFor: (id) => this.hq.labelFor(id),
       log: (m) => this.log(m),
     });
   }
@@ -169,6 +179,7 @@ export class Observer {
       control: this.fakePlayer.status(),
       chat: { available: !!this.chatLog?.available },
       turtles: this.turtles.status(),
+      hq: this.hq.status(),
     };
   }
 
@@ -196,6 +207,7 @@ export class Observer {
     this.flushTimer.setClients(this.#clients);
     void this.#pollLoop();
     void this.#turtleLoop();
+    void this.#hqLoop();
   }
 
   #onDisconnect() {
@@ -218,6 +230,9 @@ export class Observer {
       void this.#selfLoop();
       void this.#turtleLoop();
     }
+    // HQ is a separate service, not behind RCON — poll it whenever anyone is watching, so
+    // the activity labels are warm the moment the turtle stream starts.
+    if (n > 0) void this.#hqLoop();
     // Nobody is watching any more; do not leave a bot standing in the world.
     if (n === 0) void this.fakePlayer.leave().then(() => this.#announceControl());
   }
@@ -360,6 +375,11 @@ export class Observer {
    */
   #turtleLoop() {
     return this.turtles.loop(() => !this.#stopped && this.ready && this.#clients > 0);
+  }
+
+  /** HQ activity labels, ~1 Hz while a viewer is watching. Independent of RCON. */
+  #hqLoop() {
+    return this.hq.loop(() => !this.#stopped && this.#clients > 0);
   }
 
   /**

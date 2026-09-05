@@ -107,6 +107,33 @@ export function headingYawDeg(
   return ((deg % 360) + 360) % 360;
 }
 
+/** Longest activity line drawn on a tag; the rest is an ellipsis. Fleet lines are short, but "searching 6 chest(s) for stone_bricks" is not. */
+export const MAX_ACTIVITY = 28;
+
+/**
+ * The one line a turtle's tag shows: who it is, then what it is doing.
+ *
+ * `D37 · fetching wood` when both are known; `D37` when HQ has a name but no activity;
+ * `#57 · depositing` when the activity is known but the name is not (a drone HQ lists that
+ * the save files have not); `#57` when nothing but the dump knows about it. The id is shown
+ * only in the absence of a name, because a fleet of `#57`s is unreadable and a fleet of
+ * `D37`s is the whole point — the id lives in the STALE/HUD paths for debugging instead.
+ */
+export function turtleTagText(
+  name: string | null,
+  id: number,
+  activity: string | null,
+  max = MAX_ACTIVITY,
+): string {
+  const head = name ?? `#${id}`;
+  const act = activity?.trim();
+  return act ? `${head} · ${truncate(act, max)}` : head;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
 export class ComputerRegistry {
   readonly known = new Map<number, KnownComputer>();
 

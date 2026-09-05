@@ -64,7 +64,7 @@ function scriptedServer(reply) {
 }
 
 /** Run one observer against a scripted server until `done(messages)` is satisfied. */
-async function observe(reply, done, { timeoutMs = 4000, turtleMs = 0 } = {}) {
+async function observe(reply, done, { timeoutMs = 4000, turtleMs = 0, hqMs = 0 } = {}) {
   const { server, commands } = scriptedServer(reply);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
@@ -78,6 +78,8 @@ async function observe(reply, done, { timeoutMs = 4000, turtleMs = 0 } = {}) {
       // Off unless a test asks: the scripts above answer player commands only, and a dump
       // answered with player NBT is (correctly) a reported failure.
       turtleMs,
+      // HQ labels reach out over the network; off in these tests, covered in hq.test.mjs.
+      hqMs,
       flushEnabled: false,
       fakePlayerEnabled: false,
       log: () => {},

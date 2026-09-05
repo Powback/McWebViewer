@@ -723,6 +723,20 @@ with the same id and no terminator, and the client resolved on the first. A larg
 dump would have been silently cut at the first packet; `RconClient` now treats a full
 packet as "more follows".
 
+What each turtle is DOING is a different question with a different source of truth: the
+settlement brain, not the game. `bridge/src/hq.mjs` polls HQ's `fleet.status` tool
+(`http://hq:4400/invoke`, on the same compose network the bridge already joined for RCON —
+the browser cannot reach it and would hit CORS) once a second, in parallel with the dump,
+and keeps a `id -> { name, detail }` map. The line shown is the drone's own words first:
+`detail`, else `reported`, else `doing`, else `status`. Three properties matter and each is
+tested against an injected `fetch`: one call per tick with a short timeout so a slow brain
+is abandoned rather than waited on; last-known labels retained across a miss so a blip does
+not blank every tag; and the turtle stream never blocked on HQ — the label map is read at
+the dump's emit and folded into each row as `name`/`label`, so a tick where HQ was down
+simply carries the previous words. The browser composes the tag `D37 · fetching wood`
+(`src/app/computer-registry.ts` `turtleTagText`, id shown only when there is no name,
+activity truncated), keeping HQ's name over the region label when both exist.
+
 #### Drawing the players you can see: latency bought accuracy
 
 The roster arrives at 1 Hz and the first version drew it where it landed. That is not a

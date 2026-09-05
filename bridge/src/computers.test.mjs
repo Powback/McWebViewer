@@ -146,3 +146,23 @@ test('a reply with rows we cannot read at all is a failure, not an empty fleet',
   assert.equal(h.emitted.filter((m) => m.t === 'turtles').length, 0);
   assert.equal(h.poller.failures, 1);
 });
+
+test('HQ labels are folded into each row, and left off when HQ has none', async () => {
+  const emitted = [];
+  const poller = new TurtlePoller({
+    intervalMs: 1000,
+    run: async () => DUMP,
+    emit: (m) => emitted.push(m),
+    // #62 has a name and a line; #47 has a name only; #55 and #37 are unknown to HQ.
+    labelFor: (id) => ({
+      62: { name: 'D38', label: 'building' },
+      47: { name: 'D4', label: null },
+    })[id] ?? null,
+    sleep: async () => {},
+  });
+  await poller.once();
+  const rows = emitted[0].list;
+  assert.deepEqual(rows.find((r) => r.id === 62), { id: 62, on: true, x: -480, y: 64, z: 75, name: 'D38', label: 'building' });
+  assert.deepEqual(rows.find((r) => r.id === 47), { id: 47, on: true, x: -478, y: 64, z: 75, name: 'D4' });
+  assert.deepEqual(rows.find((r) => r.id === 55), { id: 55, on: false, x: -440, y: 114, z: 25 });
+});

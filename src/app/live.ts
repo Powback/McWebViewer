@@ -45,6 +45,10 @@ export interface LiveComputer {
   on: boolean;
   /** the block it occupies — integers */
   pos: [number, number, number];
+  /** the drone's HQ name (e.g. "D37"), when HQ knows this id; absent otherwise */
+  name?: string;
+  /** what HQ says the drone is doing (e.g. "fetching wood"); absent when HQ has nothing */
+  label?: string;
 }
 
 /**
@@ -348,7 +352,12 @@ export function readComputers(raw: unknown): { computers: LiveComputer[]; reject
       rejected++;
       continue;
     }
-    computers.push({ id, on: e.on === true, pos });
+    const computer: LiveComputer = { id, on: e.on === true, pos };
+    // Activity labels are additive: a row with no HQ data is a turtle with a position and
+    // no words, drawn exactly as before. Only non-empty strings are carried.
+    if (typeof e.name === 'string' && e.name) computer.name = e.name;
+    if (typeof e.label === 'string' && e.label) computer.label = e.label;
+    computers.push(computer);
   }
   return { computers, rejected };
 }

@@ -272,11 +272,19 @@ while a viewer is connected, and latches itself off if the server does not know 
 
 On screen each turtle is drawn from its own block model at the interpolated position — the
 same tracker as players, so the same one-second render delay — turning to face the way it
-moves, with a label built from the region data's block entity: `D37 #57` when the turtle
-has a label, `#57` when it does not. The region-drawn copy of any turtle that has a live
-position is hidden, so nothing is drawn twice; a turtle that drops out of the dump
-(unloaded, broken) is **held where it was last seen and marked STALE**, amber, like a lost
-player. Stationary computers get no marker: the region already draws them and they do not
+moves, with a label that says who it is and **what it is doing**: `D37 · fetching wood`,
+`D4 · depositing`, `#57` for a drone nothing has named yet.
+
+The activity comes from the settlement brain (HQ), not RCON: `computercraft dump` says
+where a turtle is, HQ says what it is doing. The bridge polls HQ's `fleet.status`
+(`http://hq:4400`, `MCWV_HQ_URL`) once a second in parallel with the dump — one call, a
+short timeout, last labels kept across a miss — and folds each drone's name and free-text
+line (`detail` › `reported` › `doing` › `status`) into the same turtle message. HQ being
+slow or down never blocks the turtle stream; the tags just carry slightly older words, or
+the id alone. Long lines are truncated on the tag. The region-drawn copy of any turtle that has a live
+position is hidden, so nothing is drawn twice; a turtle that drops out of `computercraft
+dump` (unloaded, broken) is **held where it was last seen and marked STALE**, amber, like a
+lost player. Stationary computers get no marker: the region already draws them and they do not
 move. The HUD says `27 turtles live of 35 computers (2 STALE)`.
 
 Two limits, stated: the dump carries no dimension, so a turtle in the nether would be drawn

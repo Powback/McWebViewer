@@ -119,6 +119,12 @@ let stack: PackStack | null = null;
 let registry: StateSource | null = null;
 let live: LiveView | null = null;
 /**
+ * True once live mode is starting. It moves save-file entity drawing off the static path
+ * (which draws mobs ONCE, at their load positions) and onto `LiveEntities`, which re-reads
+ * and interpolates them — so the two must not both draw, or every mob is on screen twice.
+ */
+let observing = false;
+/**
  * Looks for a newer bake while the one on screen lacks states the world has. Null on the
  * jar path, where there is no bake to refresh.
  */
@@ -457,6 +463,9 @@ function renderContraptions(reg: StateSource, atlas: TextureAtlas): number {
 function renderExtractedModels(atlas: TextureAtlas): number {
   const models = entityModels;
   if (!models) return 0;
+  // In live mode LiveEntities owns every save-file entity, drawing it live and interpolated;
+  // drawing them statically here as well would leave a frozen duplicate under each one.
+  if (observing) return 0;
   const meshes = new Map<string, EntityMesh | null>();
   const typesDrawn = new Set<string>();
   let n = 0;
@@ -734,6 +743,8 @@ document.addEventListener('drop', (e) => {
  * a mod this server does not have (see live.ts).
  */
 async function startObserving(url: string) {
+  // Set BEFORE autoLoad: it tells renderEntities to leave the mobs to LiveEntities.
+  observing = true;
   // The button appears before the world finishes loading, disabled, so it does not pop
   // into the layout later under a thumb already reaching for it.
   joinButton.render(null, true);
@@ -747,6 +758,8 @@ async function startObserving(url: string) {
     getStates: () => registry,
     regions: [...loadedRegions],
     regionBase: '/dev/region',
+    entityRegions: [...loadedRegions],
+    entityBase: '/dev/entities',
     bakedBase: '/baked',
     hudRoot: document.body,
     status,

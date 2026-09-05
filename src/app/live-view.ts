@@ -44,6 +44,7 @@ import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
 import { PlayerTracks, type RosterEntry, type TrackPose } from './player-tracks.js';
 import { NameTags } from '../render/name-tags.js';
+import { LiveEntities } from './live-entities.js';
 import { followPlacement, nextFollowed } from './follow-camera.js';
 
 /** Regions are the overworld's; a player in the nether is tracked but not drawn. */
@@ -69,6 +70,10 @@ export interface LiveViewDeps {
   regions: readonly string[];
   /** URL prefix the region files are served from, e.g. `/dev/region` */
   regionBase: string;
+  /** the parallel `entities/` regions to watch for mobs, items and falling blocks */
+  entityRegions: readonly string[];
+  /** URL prefix the entity regions are served from, e.g. `/dev/entities` */
+  entityBase: string;
   /** URL prefix the bake is served from, for the item atlas */
   bakedBase: string;
   /** block atlas + state source, needed to composite block-item icons */
@@ -91,6 +96,8 @@ export class LiveView {
   readonly pad: TouchPad;
   readonly hud: PlayHud;
   private watcher: RegionWatcher;
+  /** Save-file mobs, items and falling blocks, re-read on the same flush and interpolated. */
+  private entities: LiveEntities;
   /**
    * Which camera owns the screen. First person is the default because it is what "join a
    * server and play" means; the isometric view is a mode you ask for, from a button.
@@ -147,11 +154,24 @@ export class LiveView {
     this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions);
     this.tags = new NameTags(deps.viewer.scene);
     this.turtleTags = new NameTags(deps.viewer.scene, undefined, TURTLE_TAG_LIFT);
+    this.entities = new LiveEntities({
+      viewer: deps.viewer,
+      getContext: deps.getContext,
+      getStates: deps.getStates,
+      getEntityModels: deps.getEntityModels,
+      getIcons: () => this.icons,
+      entityRegions: deps.entityRegions,
+      entityBase: deps.entityBase,
+      status: deps.status,
+    });
     this.client = new ObserverClient(url, {
       status: deps.status,
       onPlayers: (list) => this.onPlayers(list),
       onComputers: (list) => this.onComputers(list),
-      onReload: () => void this.sync(),
+      onReload: () => {
+        void this.sync();
+        void this.entities.onReload();
+      },
       onControl: (c) => this.onControl(c),
       onSelf: (s) => this.onSelf(s),
       onVitals: (v) => this.hud.setVitals(v as unknown as Vitals),
@@ -332,6 +352,9 @@ export class LiveView {
     // What the save files already say about every computer — labels, kinds, saved blocks —
     // BEFORE the first dump arrives, so the first turtle drawn has its name.
     for (const col of this.deps.world.chunks.values()) this.absorbComputers(col);
+    // Read and draw the save's own entities (mobs, items, falling blocks) before connecting,
+    // so they are on screen at load and the first flush's re-read has a baseline to diff.
+    await this.entities.start();
     this.client.connect();
   }
 
@@ -405,6 +428,7 @@ export class LiveView {
     this.dirty.clear();
     this.turtleMeshes.clear();
     this.turtlesDrawn.clear();
+    this.entities.invalidate();
   }
 
   // -------------------------------------------------------------------------
@@ -631,6 +655,7 @@ export class LiveView {
     this.label(visible);
     this.updateFollow(poses);
     this.updateTurtles();
+    this.entities.update();
   }
 
   /**
@@ -876,6 +901,7 @@ export class LiveView {
       + ` | LIVE ${c.connected ? describeFlush(c.flush) : 'offline'}`
       + ` | ${this.playerLine()}`
       + this.turtleLine()
+      + this.entities.hudLine()
       + (age === null ? '' : ` | flushed ${age.toFixed(0)}s ago (${c.flush?.lastDurationMs ?? 0}ms)`)
       + (this.stats.chunksChanged ? ` | ${this.stats.chunksChanged} chunks changed` : '')
       + (this.dirty.size ? ` | ${this.dirty.size} to re-mesh` : '')

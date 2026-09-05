@@ -413,12 +413,15 @@ arbitrary modded block entities.
 
 Stated explicitly rather than buried:
 
-- **3 entity types still draw nothing**: `minecraft:item`, `minecraft:item_frame`,
-  `minecraft:painting`. None has a `LayerDefinition` — items render an item model, item
-  frames render a block model, and paintings are a flat quad from the `PAINTING_VARIANT`
-  registry (the harness extracted all 50 variants with sizes and textures; they are just
-  not wired up). Plus 3 billboard-style modded entities (`create:super_glue`,
-  `aeronauticsdiscovery:pin`, `simulated:honey_glue`).
+- **Items and item frames now render as their baked icon** in live mode (a bobbing
+  billboard for a dropped item, the held stack for a frame — see §7), so the two that used
+  to draw nothing no longer do. What still has no real geometry: `minecraft:painting` (a
+  flat quad from the `PAINTING_VARIANT` registry — the harness extracted all 50 variants
+  with sizes and textures, but they are not wired into an atlas the entity path can sample,
+  so a painting draws a type-labelled billboard instead), and the billboard-style modded
+  entities (`create:super_glue`, `aeronauticsdiscovery:pin`, `simulated:honey_glue`), which
+  are drawn as nothing on purpose — vanilla's own render for them is a small anchor sprite,
+  and a billboard per glue point is clutter, not information.
 - **Entities render in bind pose.** `setupAnim` is not replayed, so a spider's legs stay
   horizontal and a llama's chest cubes are always visible. Secondary layers (sheep fur,
   armour, saddles) are separate `LayerDefinition`s and are not drawn.
@@ -737,6 +740,53 @@ simply carries the previous words. The browser composes the tag `D37 · fetching
 (`src/app/computer-registry.ts` `turtleTagText`, id shown only when there is no name,
 activity truncated), keeping HQ's name over the region label when both exist.
 
+#### Save-file entities, on the same flush
+
+Mobs, animals, villagers, dropped items and falling blocks live in a PARALLEL region set,
+`world/entities/r.X.Z.mca` — the same Anvil format, but each chunk carries an `Entities`
+list instead of block sections. `src/app/live-entities.ts` watches those files exactly the
+way `region-sync.ts` watches the block regions, and reuses the same `RegionWatcher`: an 8 KB
+header Range read on every flush says which chunks' entities moved, and only those are
+re-fetched and decoded. So live entities cost no bridge change and no socket traffic — they
+ride the `save-all flush` the block sync already triggers, and a re-read that fails is
+skipped, never awaited, so the /live socket is never blocked on it. Each kind is drawn
+through machinery that already existed: mobs through the extracted-model path
+(`buildEntityQuads` + `meshEntityQuads`, one cached mesh per type, the transform per
+instance — identical to live players and the static viewer); falling blocks through
+`meshBlockSet`, centred like the turtle markers; dropped items and item frames as their
+baked icon (`ItemIcons`, the live-mode item bake) on a billboard; and any real entity the
+extraction could not capture as a type-labelled billboard rather than an invisible gap.
+
+**Why a second tracker instead of `PlayerTracks`.** The obvious move is to feed entities
+through the player/turtle tracker, and it is the wrong one. `PlayerTracks` is built for a
+1 Hz poll: it renders on a fixed ~1 s delay and INTERPOLATES between the two samples either
+side of the render clock, and flags a pose STALE the instant its newest sample is older than
+that delay. Both assumptions invert for save-file entities, which refresh only on a flush —
+5 s at best here, and the guard walks the cadence out to 20-40 s under load. Interpolating a
+random-walking mob across a 20 s gap draws a confident straight glide along a path it never
+took, and the age-based STALE flag would light amber for ~70% of every cycle on a mob that
+is simply standing between flushes. So `EntityTracks` (`src/app/entity-tracks.ts`) keeps the
+IDEAS `PlayerTracks` proved — bounded chase, shortest-arc turning, hold-and-mark-STALE — and
+re-tunes them: it CHASES the latest known position at a bounded speed (a quick reposition,
+then still) rather than gliding a whole gap, and STALENESS means "dropped out of the latest
+refresh", not "sample is old". A thing that leaves the entity regions has despawned, been
+picked up, or wandered into a chunk we do not load — indistinguishable from here — so a mob
+is held and flagged STALE (and finally forgotten after 30 s, so ghosts do not accumulate),
+while a dropped item is expired almost at once, because an item that stops being listed was
+picked up. The two policies are two instances of the one class, differing only in that hold
+window, the way players and turtles are two instances of `PlayerTracks`.
+
+**What is deliberately NOT done here.** Contraptions stay on the static path: they are large
+block sets meshed once under one transform, and re-meshing them per flush would be the most
+expensive thing in the frame for the least motion. Idle motion is limited to the item bob —
+a camera-facing billboard cannot show a spin, and inventing a yaw wobble for a cow would be
+asserting a heading the save does not report. And the honest ceiling is the flush again: a
+mob in a chunk the server is not ticking has a frozen position on disk, so it is frozen on
+screen, correctly. Verified against the live server: with a viewer connected (which is what
+arms the flush) the `entities/` region is rewritten every few seconds, the item roster turns
+over as eggs are laid and picked up, and 468 mobs + ~48 items draw at 150+ fps of headroom;
+the passive herd around the base sits still because, on disk, it is sitting still.
+
 #### Drawing the players you can see: latency bought accuracy
 
 The roster arrives at 1 Hz and the first version drew it where it landed. That is not a
@@ -816,12 +866,14 @@ fails if any of the three goes quiet again.
 
 #### The honest limits
 
-Granularity is the flush interval, so this is seconds, not 20 tps. **Only blocks update** —
-mobs and items are read from the entity regions at load and never refreshed, so a turtle
-moving appears and a cow walking does not. Live players come from RCON and do update, but
-in bind pose, always as Steve, and about a second behind live (see above). And a
-full-fidelity modded client in a browser remains a *streaming* problem (Sunshine + a web
-Moonlight client, or Selkies), not a protocol one.
+Granularity is the flush interval, so this is seconds, not 20 tps. Blocks AND save-file
+entities (mobs, items, falling blocks) both refresh on that flush now — a cow that walks and
+an egg that is laid move on screen the same way a turtle stepping does — but a mob standing
+in a chunk the server is not ticking does not move at all, because its AI is not running, and
+a moving one is repositioned-then-held between flushes rather than animated. Live players
+come from RCON and update faster, but in bind pose, always as Steve, and about a second
+behind live (see above). And a full-fidelity modded client in a browser remains a *streaming*
+problem (Sunshine + a web Moonlight client, or Selkies), not a protocol one.
 
 ### What the current code already gives this
 
@@ -848,3 +900,66 @@ typed arrays, so moving it into a worker is a transfer-list change, not a rewrit
 - **Modded packets are opaque.** Create, AE2 and CC:T all send custom payloads; anything
   needing their client state (contraption motion, turtle animation) is per-mod protocol
   work with no shared spec.
+
+---
+
+## 8. Not rendered / why — the audit against a faithful client
+
+The brief asked for an explicit enumeration of what a real Minecraft render shows that this
+does not, with the feasible ones built and the rest listed with a reason rather than skipped
+in silence. What a `save-file + rcon` architecture can reach, it now reaches; the gaps below
+are either genuine limits of that architecture or deliberate scope calls.
+
+### Now rendered (this pass)
+
+| thing | how | note |
+|---|---|---|
+| **Live mobs / animals / villagers** | extracted models, re-read on flush, interpolated | §7. The single largest gap — a whole class of the world that used to be frozen at load. |
+| **Dropped items** | baked icon on a bobbing billboard, expired on despawn | §7 |
+| **Falling blocks** | `BlockState` through the block mesher | previously drew nothing even statically |
+| **Item frames** | held stack as its icon | rare in this world; wired anyway |
+| **Entity nameplates** | a `CustomName`'d mob carries a name tag; a geometry-less mob a type label | reuses the player `NameTags` |
+| **Minecarts / chest minecarts** | fall out of the extracted-model path for free | they *are* `LayerDefinition` entities; verified drawing |
+
+### Not rendered, and why
+
+- **Particles** (smoke, flame, redstone dust, splashes, portal swirl). Not in the save at
+  all — they are client-side transient effects computed from block/entity state each tick,
+  with no persistent representation to read. A faithful particle system would be a
+  from-scratch simulator keyed off block state, which is a project of its own and adds no
+  information a static render needs. **Out of scope by nature of the data source.**
+- **Day/night, sky and celestial bodies.** The save stores `DayTime` (in `level.dat`), so a
+  sun angle and sky tint are *readable* and this is the most tractable of the remaining
+  items — but the current renderer lights vertices from stored block/sky light with a fixed
+  sky colour and fog, and a moving sun means a directional light plus a skybox plus
+  recomputing the ambient term, i.e. a lighting-model change, not an entity. **Feasible,
+  deliberately deferred** — noted here rather than half-built.
+- **Block-entity dynamic contents and animation.** The *geometry* of chests, signs, banners,
+  beds, skulls, pots and shulkers is synthesized (§5a). What is not drawn: a chest's open lid
+  angle, a sign's or item frame's rendered text/held-item *in situ from the block entity*
+  (item frames are entities and ARE drawn; signs' text is not), a banner's dye layers, a
+  brewing stand's bottles. These live in a `BlockEntityRenderer` whose output is a function
+  of tick time and neighbours — the general fix is the capture harness (§5), not a per-block
+  reimplementation. **Out of scope without the harness.**
+- **Paintings.** A flat quad from the `PAINTING_VARIANT` registry; the harness extracted all
+  50 variants with sizes and textures, but their textures are not in an atlas the entity
+  path samples, so a painting currently draws a type-labelled billboard. **Feasible, small,
+  deferred** (needs the painting sprites folded into the bake).
+- **Create contraption MOTION.** Contraptions are decoded and drawn (§5, §6) at their stored
+  `Pos`/`Angle`, but they are not re-meshed per flush — a spinning bearing or a moving train
+  is drawn where the last save left it. Re-meshing a large block set every frame for the
+  motion of one entity is the wrong trade; the honest live answer for Create is the streaming
+  client. **Deliberate scope call.**
+- **XP orbs, projectiles (arrows, tridents), fishing bobbers, area-effect clouds, markers,
+  displays.** The transient/invisible ones (`area_effect_cloud`, `marker`, `*_display`,
+  `fishing_bobber`) draw nothing, as they do in vanilla. XP orbs and arrows are real entities
+  and *could* get a billboard/small mesh, but they are short-lived flicker that would add
+  churn without telling you anything about the base; left as skip. **Deliberate scope call.**
+- **Boats and non-minecart vehicles.** Extracted-model entities like minecarts draw; a boat
+  would too if one appeared. None is in the reference world to verify against, so it is
+  untested rather than excluded.
+- **Full skeletal animation of any entity.** Still bind pose — no `setupAnim` — as for the
+  static viewer and live players (§6). A walking mob slides; its legs do not swing. **Out of
+  scope without the capture harness.**
+- **Fluids, animated textures, mipmaps, shaderpacks on a real GPU.** Unchanged from §6/§4 and
+  the shaderpack note — none is an entity concern.

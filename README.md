@@ -56,6 +56,14 @@ their reasons, and an explicit list of what was rejected and why.
   are interpolated between samples so they walk rather than teleport, carry a name tag, go
   stale visibly when the bridge does, and can be followed with `F`. See
   [Live mode](#live-mode--watching-a-running-server).
+- **Live entities and items** — mobs, animals, villagers, dropped items and falling blocks
+  are read from the parallel `entities/` regions and **refreshed on the same flush the
+  blocks use**, so a cow walking, a creeper wandering, an egg being laid or a sand block
+  falling all move on screen. Mobs draw from the extracted models (the same path the static
+  viewer and live players use); dropped items draw as their baked icon on a bobbing
+  billboard; each interpolates between refreshes and is held STALE (mobs) or expired (items)
+  when it drops out of the save. See [Live entities](#live-entities-and-items) and
+  ARCHITECTURE.md §7.
 - **Play from the browser** — a Join button spawns a server-side fake player you drive
   with WASD and the mouse. Needs SiliconeDolls on the server; off by default, and the
   button stays disabled with the server's own reason when it cannot work. See
@@ -65,8 +73,11 @@ their reasons, and an explicit list of what was rejected and why.
 
 Stated plainly; see ARCHITECTURE.md §6.
 
-- **3 entity types** (`item`, `item_frame`, `painting`) plus 3 modded billboard entities
-  still draw nothing — none has a `LayerDefinition` to extract. See ARCHITECTURE.md §6.
+- **`painting` and a few modded billboard entities** (`create:super_glue`,
+  `aeronauticsdiscovery:pin`, `simulated:honey_glue`) still have no real geometry — none has
+  a `LayerDefinition` to extract. Items and item frames now render as their icon, and any
+  other geometry-less mob (e.g. `friendsandfoes:crab`, whose extraction failed) draws a
+  clean type-labelled billboard rather than nothing. See ARCHITECTURE.md §6.
 - **Entities render in bind pose** — no `setupAnim`, so a spider's legs stay horizontal;
   no secondary layers (sheep fur, armour, saddles). Live players are drawn the same way,
   and always with the default Steve skin — they slide rather than stride, and they are told
@@ -74,9 +85,13 @@ Stated plainly; see ARCHITECTURE.md §6.
 - **Live players are drawn about a second behind live.** That is the cost of interpolating
   between two real samples instead of guessing past the newest one; the HUD prints the
   number. See [Live players](#live-players).
-- **Live mode sees blocks, not entities.** Mobs and items are read from the save files at
-  load and are not refreshed; a turtle moving shows up (it is a block), a cow walking does
-  not. Live *players* come from RCON and do update.
+- **Live entity motion is bounded by the flush cadence, not the tick.** Mobs and items
+  refresh only when the server flushes the `entities/` regions — every 5 s at best, and the
+  guard walks that out under load — so a mob that moves is *repositioned with a short slide
+  and then held*, not animated frame-by-frame, and a mob standing in a non-ticking chunk
+  (no player nearby) does not move at all because its AI is not running. This is the same
+  trade the block view makes, stated the same way. Live *players* come from RCON at 1 Hz and
+  are smoother.
 - **The pathfinder plans over loaded chunks only,** which is what it can see. A
   destination past the edge of the render distance is refused rather than guessed at, and a
   long walk is planned in stages as the world streams in. See
@@ -291,6 +306,46 @@ Two limits, stated: the dump carries no dimension, so a turtle in the nether wou
 at its nether coordinates in the overworld (the reference fleet is all overworld); and a
 turtle moving backwards is drawn facing its direction of travel, because heading comes
 from motion.
+
+#### Live entities and items
+
+The save keeps mobs, animals, villagers, dropped items and falling blocks in a PARALLEL
+region set — `world/entities/r.X.Z.mca`, the same Anvil format as the block regions but with
+each chunk holding an `Entities` list. Live mode watches those files exactly the way it
+watches the block regions: an 8 KB Range read of the header on every flush finds the chunks
+whose entities moved, and only those are re-fetched and decoded (`src/app/live-entities.ts`,
+reusing the block sync's `RegionWatcher`). So no bridge change and no new socket traffic —
+entities ride the flush that was already happening.
+
+Each kind is drawn the way it reads best in a map of a base:
+
+- **mobs / animals / villagers** from the extracted Java models — the same geometry the
+  static viewer and live players use, one cached mesh per type, moved by a transform and
+  turned to face its `Rotation`;
+- **dropped items** (`minecraft:item`) as the item's baked icon on a small billboard that
+  bobs, occluded by terrain and expired the moment the save stops listing it;
+- **falling blocks** (`minecraft:falling_block`) as their `BlockState` through the block
+  mesher;
+- **item frames** as their held stack's icon;
+- **anything else that is a real entity but has no extracted geometry** (a
+  `friendsandfoes:crab`, whose extraction failed) as a clean type-labelled billboard, so it
+  is never an invisible gap.
+
+Motion is interpolated by `EntityTracks` (`src/app/entity-tracks.ts`), a tracker tuned for
+the flush cadence rather than for the 1 Hz player poll: it chases the latest known position
+at a bounded speed — a quick reposition, then still — instead of gliding a mob across a
+20 s gap along a path it never walked, and it treats STALE as "dropped out of the latest
+refresh", not "sample is old". A mob that leaves the loaded set is held and marked STALE
+(amber, like a lost player); a dropped item that vanishes is expired. Contraptions are left
+to the static path (they are big block sets meshed once, not per frame) and the
+honestly-invisible entities (markers, glue anchors) still draw nothing. The HUD says
+`468 entities, 48 items live`.
+
+Two limits, stated: motion is only as fresh as the flush (see below — every 5 s at best,
+often much slower under load), so a moving mob is repositioned-then-held rather than animated
+frame-by-frame; and a mob in a chunk the server is not ticking (no player nearby) does not
+move at all, because its AI is not running. Both are properties of a save-file view, the same
+ones the block path has.
 
 #### Live block changes — and what they cost the server
 

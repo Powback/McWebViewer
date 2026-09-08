@@ -87,6 +87,15 @@ export interface LiveViewDeps {
    * every frame and would undo it before it was ever drawn.
    */
   fly?: { lookAt: (x: number, y: number, z: number) => void };
+  /**
+   * Chunk streaming hooks. `chunkFilter` limits a flush's re-reads to the chunks that are
+   * loaded; `onSynced` runs after each sync so the streamer can re-read its index (a saved
+   * chunk moves in the file); `onIngest` reports a chunk this view loaded on its own (a
+   * turtle's chunk read on demand) so the streamer counts it as loaded.
+   */
+  chunkFilter?: (cx: number, cz: number) => boolean;
+  onSynced?: () => void;
+  onIngest?: (cx: number, cz: number) => void;
 }
 
 export class LiveView {
@@ -151,7 +160,7 @@ export class LiveView {
   private smoothed: [number, number, number] | null = null;
 
   constructor(url: string, private deps: LiveViewDeps) {
-    this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions);
+    this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions, deps.chunkFilter);
     this.tags = new NameTags(deps.viewer.scene);
     this.turtleTags = new NameTags(deps.viewer.scene, undefined, TURTLE_TAG_LIFT);
     this.entities = new LiveEntities({
@@ -370,10 +379,20 @@ export class LiveView {
       const changed = await this.watcher.poll();
       this.stats.chunksChanged = changed.length;
       for (const c of changed) this.ingest(c.cx, c.cz, c.root);
+      this.deps.onSynced?.();
     } finally {
       this.syncing = false;
       this.stats.syncMs = performance.now() - t0;
     }
+  }
+
+  /**
+   * A chunk the streaming loader just added. Its computers (labels, kinds, saved blocks)
+   * are absorbed exactly as `start()` absorbs those of the chunks loaded before it ran —
+   * on the streaming path most of the world arrives after that.
+   */
+  noteColumn(col: ChunkColumn): void {
+    this.absorbComputers(col);
   }
 
   /**
@@ -385,6 +404,7 @@ export class LiveView {
   private ingest(cx: number, cz: number, root: Parameters<World['addChunk']>[0]): void {
     const before = this.deps.world.getChunk(cx, cz);
     const after = this.deps.world.addChunk(root);
+    this.deps.onIngest?.(cx, cz);
     // The re-read chunk may have moved a turtle's SAVED block: the old one must un-hide
     // and the new one hide, or the region draws a turtle where it no longer is.
     this.absorbComputers(after);

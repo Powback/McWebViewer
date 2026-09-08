@@ -79,6 +79,14 @@ export class RegionWatcher {
   constructor(
     private fetchRange: RangeFetch,
     readonly names: readonly string[],
+    /**
+     * Which changed chunks are worth fetching. With chunk streaming only the chunks on
+     * screen are loaded, and re-reading a chunk 400 blocks away because a mob moved in it
+     * is the whole-world load all over again, five seconds at a time. A filtered-out
+     * chunk's slot is still recorded, so it is not reported as "changed" forever; the
+     * streamer reads it fresh if the camera ever gets there.
+     */
+    private filter: (cx: number, cz: number) => boolean = () => true,
   ) {}
 
   get primed(): boolean {
@@ -96,13 +104,31 @@ export class RegionWatcher {
       const known = this.slots.get(name);
       const current = await this.readHeader(name);
       if (!current || !known) continue;
+      const [rx, rz] = regionCoords(name);
       for (const [idx, slot] of current) {
         if (sameSlot(known.get(idx), slot)) continue;
+        if (!this.filter(rx * 32 + (idx & 31), rz * 32 + (idx >> 5))) continue;
         const chunk = await this.readChunk(name, idx, slot);
         if (chunk) out.push(chunk);
       }
     }
     return out;
+  }
+
+  /**
+   * Read one chunk NOW, whether or not its header changed. For a computer that appears in
+   * the live stream inside a chunk that was saved before the page loaded and has not been
+   * rewritten since: its header never changes, so `poll()` would never re-read it, and the
+   * turtle would draw bare (no block entity, so no upgrades) until a reload. Null when the
+   * chunk is not in a watched region or cannot be read.
+   */
+  async readAt(cx: number, cz: number): Promise<ChangedChunk | null> {
+    const name = `r.${cx >> 5}.${cz >> 5}.mca`;
+    if (!this.names.includes(name)) return null;
+    const header = this.slots.get(name) ?? await this.readHeader(name);
+    const slot = header?.get(((cz & 31) << 5) | (cx & 31));
+    if (!slot || !slot.sectorCount) return null;
+    return this.readChunk(name, ((cz & 31) << 5) | (cx & 31), slot);
   }
 
   private async readHeader(name: string): Promise<Map<number, Slot> | null> {

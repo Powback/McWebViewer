@@ -179,6 +179,25 @@ asymmetric.
 are underground and never seen. Instead a work queue sorted by distance to the camera is
 drained against an 8 ms/frame budget, re-sorted when the camera moves far enough.
 
+**Fetching is streamed the same way** (`src/app/chunk-stream.ts`). The first version
+downloaded and parsed every served region before the first frame — 15 MB and 2,488 chunks
+for four regions, most of them beyond the render distance. The fix needed no server code
+and no new format: an Anvil region is already an indexed per-chunk store (8 KB header of
+sector offsets and timestamps, then 4 KB-aligned chunk payloads) and nginx honours Range
+requests, so the page reads each header, then fetches chunks nearest-first by byte range,
+coalescing chunks stored within 16 KB of each other into one request. That is the same two
+reads the live sync has used since it stopped re-downloading regions on every flush, and
+the header entry (timestamp, offset, count) serves as the per-chunk ETag on both paths.
+Two details that matter: a section is meshed only when its eight neighbouring columns are
+loaded or known not to be coming (otherwise its edge is lit as open sky and never healed),
+and a decoded chunk whose `xPos`/`zPos` disagree with the index — the file was rewritten
+between the two reads — is discarded and the index re-read. Sections buried below their
+column's surface are meshed after everything above ground while the camera is in the air;
+underground was three quarters of the meshing and none of the picture. Rejected: a
+per-chunk endpoint in the container. It would have meant a second copy of the region
+reader running server-side over a live world's files, a cache to invalidate on every
+flush, and a format for the page to drift from — for bytes nginx already serves.
+
 ### Four bugs worth recording, because each looked like something else
 
 1. **Solid terrain rendered pure black while leaves looked correct.** The tempting

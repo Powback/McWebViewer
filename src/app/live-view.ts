@@ -23,7 +23,7 @@ import type { Viewer } from '../render/viewer.js';
 import type { ChunkColumn, World } from '../render/world.js';
 import { meshBlockSet, type BlockSetMesh } from '../render/entities.js';
 import {
-  ComputerRegistry, changedSections, headingYawDeg, turtleIdOf, turtleKey, turtleTagText,
+  ComputerRegistry, changedSections, headingYawDeg, turtleIdOf, turtleKey, turtleTagText, turtleActivity, turtleStateColor,
 } from './computer-registry.js';
 import {
   buildEntityQuads, entityYawDeg, meshEntityQuads, type EntityMesh, type EntityModelSet,
@@ -45,6 +45,9 @@ import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
 import { PlayerTracks, type RosterEntry, type TrackPose } from './player-tracks.js';
 import { NameTags } from '../render/name-tags.js';
 import { LiveEntities } from './live-entities.js';
+import { MonitorScreens } from './monitor-screens.js';
+import { ScreenFiles } from './screen-files.js';
+import type { LiveMonitor } from './live.js';
 import { followPlacement, nextFollowed } from './follow-camera.js';
 
 /** Regions are the overworld's; a player in the nether is tracked but not drawn. */
@@ -98,6 +101,9 @@ export interface LiveViewDeps {
   onIngest?: (cx: number, cz: number) => void;
 }
 
+/** How long a turtle missing from the dump is still drawn (stale) before it is forgotten. */
+const TURTLE_HOLD_MS = 60_000;
+
 export class LiveView {
   readonly client: ObserverClient;
   readonly controls: LiveControls;
@@ -139,18 +145,29 @@ export class LiveView {
   /** What the save files know about each computer id: kind, label, saved block, facing. */
   private computers = new ComputerRegistry();
   /** The players' tracker, but a turtle that leaves the dump is HELD, not dropped. */
-  private turtleTracks = new PlayerTracks(DRAWN_DIMENSION, { holdLost: true });
+  // Held while out of the dump (an unloaded chunk), but not for ever: a removed turtle drops
+  // out too, and after a minute the world's silence is the answer.
+  private turtleTracks = new PlayerTracks(DRAWN_DIMENSION, { holdLost: true, holdLostMs: TURTLE_HOLD_MS });
   private turtleTags: NameTags;
   /** Last live block and heading per id — the dump has no facing, so it comes from motion. */
   private liveHeading = new Map<number, { pos: readonly [number, number, number]; yaw: number }>();
   /** One mesh per turtle block state, built about the block's bottom centre; null = not in the bake. */
   private turtleMeshes = new Map<string, BlockSetMesh | null>();
   private turtlesDrawn = new Set<string>();
+  private screens: MonitorScreens;
   private lastTurtlePoses: TrackPose[] = [];
   /** Region-drawn turtle blocks hidden because their computer has a live track; see mesher.ts. */
   private hidden: ReadonlyMap<string, ReadonlySet<number>> = new Map();
   /** HQ's name and activity line per computer id — what the drone is DOING, not where. */
   private hqLabels = new Map<number, { name: string | null; activity: string | null }>();
+  /** whether the dump last saw each computer switched on — the state word when HQ is silent */
+  private liveOn = new Map<number, boolean>();
+  /** when each unknown computer's chunk was last read on demand (see describe) */
+  private describedAt = new Map<number, number>();
+  /** monitor text from the computers' own save files; the bridge feed fills panels it lacks */
+  private screenFiles: ScreenFiles;
+  private fileScreens: LiveMonitor[] = [];
+  private feedScreens: LiveMonitor[] = [];
 
   /** Counters the HUD reports, so "it is connected" and "it is working" stay separable. */
   readonly stats = { chunksChanged: 0, sectionsRemeshed: 0, syncMs: 0, players: 0, computers: 0 };
@@ -162,7 +179,16 @@ export class LiveView {
   constructor(url: string, private deps: LiveViewDeps) {
     this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions, deps.chunkFilter);
     this.tags = new NameTags(deps.viewer.scene);
-    this.turtleTags = new NameTags(deps.viewer.scene, undefined, TURTLE_TAG_LIFT);
+    // Turtle bars are STATE colours (green working, grey idle, red off); the word says the same.
+    this.turtleTags = new NameTags(deps.viewer.scene, undefined, TURTLE_TAG_LIFT, turtleStateColor);
+    // Text on the monitors: the computers' own screen.json files first, the bridge feed for
+    // any panel those do not cover; blank until one of them says otherwise.
+    this.screens = new MonitorScreens(deps.viewer.scene);
+    this.screenFiles = new ScreenFiles({
+      computers: () => [...this.computers.known.values()].map((k) => ({ id: k.id, pos: k.pos })),
+      stateAt: (x, y, z) => deps.world.palette[deps.world.getState(x, y, z)],
+      onMonitors: (list) => { this.fileScreens = list; this.paintScreens(); },
+    });
     this.entities = new LiveEntities({
       viewer: deps.viewer,
       getContext: deps.getContext,
@@ -177,6 +203,7 @@ export class LiveView {
       status: deps.status,
       onPlayers: (list) => this.onPlayers(list),
       onComputers: (list) => this.onComputers(list),
+      onMonitors: (list) => { this.feedScreens = list; this.paintScreens(); },
       onReload: () => {
         void this.sync();
         void this.entities.onReload();
@@ -361,6 +388,7 @@ export class LiveView {
     // What the save files already say about every computer — labels, kinds, saved blocks —
     // BEFORE the first dump arrives, so the first turtle drawn has its name.
     for (const col of this.deps.world.chunks.values()) this.absorbComputers(col);
+    this.screenFiles.start();
     // Read and draw the save's own entities (mobs, items, falling blocks) before connecting,
     // so they are on screen at load and the first flush's re-read has a baseline to diff.
     await this.entities.start();
@@ -473,6 +501,8 @@ export class LiveView {
     const roster: RosterEntry[] = [];
     for (const c of list) {
       this.noteHqLabel(c);
+      this.liveOn.set(c.id, c.on);
+      if (this.computers.kindOf(c.id) === 'unknown') void this.describe(c);
       if (this.computers.kindOf(c.id) === 'computer') continue;
       roster.push({
         name: turtleKey(c.id),
@@ -483,6 +513,22 @@ export class LiveView {
     }
     this.turtleTracks.ingest(roster, performance.now());
     this.refreshHidden();
+  }
+
+  /**
+   * A computer the dump lists but no loaded chunk has described: read its chunk now. The
+   * region watcher only re-reads chunks whose header changed, and a turtle placed into a
+   * chunk that was saved before the page loaded sits in one that never does — so without
+   * this it would draw as a bare default turtle (no block entity: no label, no upgrades)
+   * until a reload. One read per id per minute at most.
+   */
+  private async describe(c: LiveComputer): Promise<void> {
+    const now = performance.now();
+    const last = this.describedAt.get(c.id) ?? -Infinity;
+    if (now - last < 60_000) return;
+    this.describedAt.set(c.id, now);
+    const chunk = await this.watcher.readAt(c.pos[0] >> 4, c.pos[2] >> 4).catch(() => null);
+    if (chunk) this.ingest(chunk.cx, chunk.cz, chunk.root);
   }
 
   /**
@@ -534,7 +580,7 @@ export class LiveView {
   private turtleTag(id: number): string {
     const hq = this.hqLabels.get(id);
     const name = hq?.name ?? this.computers.get(id)?.label ?? null;
-    return turtleTagText(name, id, hq?.activity ?? null);
+    return turtleTagText(name, id, turtleActivity(hq?.activity, this.liveOn.get(id) ?? true));
   }
 
   private drawTurtles(poses: readonly TrackPose[]): void {
@@ -543,7 +589,7 @@ export class LiveView {
       const id = turtleIdOf(pose.name);
       const key = `turtle:${id}`;
       alive.add(key);
-      const mesh = this.turtleMesh(this.computers.markerState(id));
+      const mesh = this.turtleMesh(this.computers.markerStates(id));
       if (!mesh) continue;
       // The mesh is built about the block's bottom centre, so the heading turns the turtle
       // on its own axis; the position is therefore the centre of the block it occupies.
@@ -567,25 +613,40 @@ export class LiveView {
    * every turtle of that kind. Null when the bake has no model for it — the label is still
    * drawn, and the NOT IN BAKE count on the HUD says why the body is missing.
    */
-  private turtleMesh(stateKey: string): BlockSetMesh | null {
-    const hit = this.turtleMeshes.get(stateKey);
+  private turtleMesh(stateKeys: readonly string[]): BlockSetMesh | null {
+    const cacheKey = stateKeys.join('|');
+    const hit = this.turtleMeshes.get(cacheKey);
     if (hit !== undefined) return hit;
     const ctx = this.deps.getContext();
     const states = this.deps.getStates();
     if (!ctx || !states) return null; // not ready; not cached, so it is retried next frame
-    const mesh = meshBlockSet([{ x: -0.5, y: 0, z: -0.5, stateKey }], states, ctx.atlas);
+    // The body and its upgrades occupy the same block; meshBlockSet draws them all there.
+    const blocks = stateKeys.map((stateKey) => ({ x: -0.5, y: 0, z: -0.5, stateKey }));
+    const mesh = meshBlockSet(blocks, states, ctx.atlas);
     const usable = mesh.quadCount ? mesh : null;
     if (!usable) {
-      this.deps.status(`live: no model for ${stateKey} in the bake — that turtle is a label until it is re-baked`);
+      this.deps.status(`live: no model for ${stateKeys[0]} in the bake — that turtle is a label until it is re-baked`);
     }
-    this.turtleMeshes.set(stateKey, usable);
+    this.turtleMeshes.set(cacheKey, usable);
     return usable;
+  }
+
+  /** Files win per panel; the bridge feed covers the rest. */
+  private paintScreens(): void {
+    const seen = new Set(this.fileScreens.map((m) => `${m.x},${m.y},${m.z},${m.facing}`));
+    const rest = this.feedScreens.filter((m) => !seen.has(`${m.x},${m.y},${m.z},${m.facing}`));
+    this.screens.update([...this.fileScreens, ...rest]);
   }
 
   /** Read a column's computer block entities; a changed record re-plans what is hidden. */
   private absorbComputers(col: ChunkColumn): void {
     const w = this.deps.world;
     const changed = this.computers.absorb(col, (x, y, z) => w.palette[w.getState(x, y, z)]);
+    // A computer the re-read column no longer contains is gone from the world: its live
+    // marker must not outlive its block.
+    for (const id of changed) {
+      if (!this.computers.get(id)) this.turtleTracks.forget(turtleKey(id));
+    }
     if (changed.length) this.refreshHidden();
   }
 

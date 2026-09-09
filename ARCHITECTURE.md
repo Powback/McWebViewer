@@ -428,6 +428,76 @@ This is the pragmatic complement to the capture harness, not a replacement for i
 covers vanilla's fixed set cheaply and exactly, while the harness is what scales to
 arbitrary modded block entities.
 
+## 5b. Painted surfaces: a structural rule, not a block list
+
+The rule above (no `elements` => block entity) misses the other kind of block-entity block:
+one whose model JSON is complete and bakes fine, but leaves a see-through area for the
+renderer to fill every frame. A ComputerCraft monitor is the case in hand — a plain cube
+whose front texture is transparent where the screen is — but the rule names nothing. A block
+gets a dark backdrop behind a face when (1) the WORLD has block entities at blocks of that
+name — read from the region files by the bake's scan (`blockEntityBlocks`) or the browser's
+loaded chunks, and handed to `BlockRegistry` — because a renderer only exists for blocks
+that have one; (2) the model is a full cube, so what shows through is the renderer's and not
+a neighbour's; (3) the face's texture has binary (fully transparent) texels — translucent
+faces are glass-like and untouched. Leaves are full cutout cubes with no block entity and
+are left alone; a spawner's cage gets an interior, which is what it looks like in game.
+
+The backdrop (`src/render/ber-overlays.ts`) is baked with the block's own `Variant`
+rotation so it lands where the face does, and the face then counts as opaque for occlusion
+— without that, side faces between two adjacent monitors survived and drew a dark grid of
+seams across every merged screen. The sprite exists in no jar; `src/assets/builtin-pack.ts`
+synthesises `mcwv:block/interior_dark` (0x111111) at the bottom of every `PackStack`.
+Terminal CONTENTS are out of reach of the save and of RCON, so screens stay blank until the
+live feed (monitor-screens.ts) supplies text.
+
+Because this changes the baker's output for an unchanged world, the bundle carries a
+`BAKE_FORMAT` (`src/server/bake-plan.ts`) and the baker re-bakes once when the served
+bundle's format is older than its own.
+
+## 5c. Winding is a property of the geometry, not of the corner order
+
+Vanilla's `FaceInfo` corner order is counter-clockwise from outside for the side faces and
+clockwise for the horizontal ones, and a variant rotation permutes it again. Under
+`THREE.FrontSide` a fixed index order therefore culls every block top. The terrain mesher
+derives the winding per quad: compare the emitted triangle's cross product with the face's
+outward direction and reverse when they disagree (`facesInward`).
+
+Two bugs hid in what "outward" meant. `meshBlockSet` (Create contraptions, live turtles)
+still used the fixed order — a live turtle drew as an open box you looked into, lid gone,
+the inside of its far walls showing. And "quad centre minus block centre" is zero for a
+slab top (y = 0.5) and perpendicular to a stair's riser (offset straight up, face pointing
+sideways), so those fell back to the fixed order and rendered as holes. `quadOutward` now
+uses the centre offset only when it has a component along the face's normal, and the
+declared `facing` otherwise — slabs and stairs carry no element rotation, and the 45-degree
+rotations that do exist cannot flip the sign of that dot product. Both meshers share it, and
+`entities.test.ts` / `mesher.test.ts` bake real turtle, slab and stair elements and assert
+every triangle faces out.
+
+## 5d. Turtle upgrades: one generic data path
+
+The mesher keys geometry by block state; what a turtle carries is in its block entity.
+`src/render/turtle-upgrades.ts` mints a synthetic state per (facing, side, upgrade) that the
+registry bakes like a block, the bake tool collects from every block entity carrying
+`LeftUpgrade`/`RightUpgrade` (the CC:T API's fields — no block name is checked; all four
+facings, so a turtle can turn or move live without a re-bake), and the mesher emits at the
+entity's position after walking the section's block entities. Live turtles reuse the keys
+with the last block entity seen for their computer id.
+
+Which model, from data alone, in order: the upgrade DEFINITION (`data/<ns>/computercraft/
+turtle_upgrade/<name>.json`: `type`, `item`); a SIDED MODEL by the naming convention every
+mod that ships one follows, `<ns>:block/turtle_<name>_<side>`, tried over the upgrade's, the
+type's and the item's namespaces and names (CC:T's speaker and workbench, Advanced
+Peripherals' scanner all resolve this way from the jars); else the ITEM's model — a generated
+item as a one-texel card stood on the side at CC:T's ±0.4065 offset, a block item (a modem)
+as its block model fitted into the footprint of the mods' own `turtle_upgrade_base_<side>`.
+
+The unavoidable Java: CC:T registers its modem models in code with no data mapping from the
+upgrade to them (so a modem takes the item path — right shape and texture, no on/off glow),
+and the flat-item placement matrix is code, of which only the offsets are recoverable from
+the jar; the orientation ("upright on the side, image top forward") was checked against the
+game. Vanilla mob models are likewise Java (`entity-geometry.ts` loads them from the
+extracted vanilla-entity table, the one per-game exception, not per mod).
+
 ## 6. Known gaps and approximations
 
 Stated explicitly rather than buried:

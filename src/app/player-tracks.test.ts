@@ -392,3 +392,21 @@ test('a reconnect gap does not become the new cadence', () => {
   assert.equal(tracks.delayMs, before,
     'an outage must not push the render delay out for everybody afterwards');
 });
+
+test('a held (lost) track is forgotten after holdLostMs — a removed turtle does not outlive its block', () => {
+  const tracks = new PlayerTracks('overworld', { holdLost: true, holdLostMs: 5000 });
+  const t0 = 100_000;
+  tracks.ingest([{ name: '#14', pos: [60, 69, 33], yawDeg: 0, dimension: 'overworld' }], t0);
+  tracks.ingest([{ name: '#14', pos: [60, 69, 33], yawDeg: 0, dimension: 'overworld' }], t0 + 1000);
+  tracks.ingest([], t0 + 2000); // gone from the dump
+  assert.equal(tracks.poses(t0 + 4000).length, 1, 'held for a while, in case its chunk merely unloaded');
+  assert.equal(tracks.poses(t0 + 4000)[0].stale, true);
+  assert.equal(tracks.poses(t0 + 8000).length, 0, 'then forgotten');
+});
+
+test('forget() drops a track at once', () => {
+  const tracks = new PlayerTracks('overworld', { holdLost: true });
+  tracks.ingest([{ name: '#14', pos: [60, 69, 33], yawDeg: 0, dimension: 'overworld' }], 0);
+  tracks.forget('#14');
+  assert.equal(tracks.poses(1500).length, 0);
+});

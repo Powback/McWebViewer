@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planBake, type BundleInventory, type WorldInventory } from './bake-plan.js';
+import { BAKE_FORMAT, planBake, type BundleInventory, type WorldInventory } from './bake-plan.js';
 
 function world(over: Partial<WorldInventory> = {}): WorldInventory {
   return {
@@ -23,6 +23,7 @@ function world(over: Partial<WorldInventory> = {}): WorldInventory {
 
 function bundle(over: Partial<BundleInventory> = {}): BundleInventory {
   return {
+    version: BAKE_FORMAT,
     states: {
       'minecraft:air': 1,
       'minecraft:stone': 1,
@@ -109,4 +110,17 @@ test('prototype names are not mistaken for baked states', () => {
   // `'constructor' in {}` is true; a block called that must still count as missing.
   const plan = planBake(world({ states: ['constructor'] }), bundle());
   assert.deepEqual(plan.missingStates, ['constructor']);
+});
+
+test('a bundle written by an older baker format is baked once even with nothing new in the world', () => {
+  // The world is fully covered; only the baker's own rules changed (e.g. monitors gained
+  // their screen overlay). Set comparison alone would never notice.
+  const plan = planBake(world(), bundle({ version: 1 }));
+  assert.equal(plan.needed, true);
+  assert.match(plan.reasons.join(';'), /bundle format 1 predates/);
+  assert.deepEqual(plan.missingStates, []);
+  // ...and a bundle with no version at all is the oldest kind.
+  assert.equal(planBake(world(), bundle({ version: undefined })).needed, true);
+  // A current bundle that covers the world stays put.
+  assert.equal(planBake(world(), bundle({ version: BAKE_FORMAT })).needed, false);
 });

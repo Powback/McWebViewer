@@ -37,7 +37,8 @@ import {
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'fflate';
-import { planBake } from '../server/bake-plan.js';
+import { BAKE_FORMAT, planBake } from '../server/bake-plan.js';
+import { readTurtleUpgrades, upgradeStateKeysAllFacings } from '../render/turtle-upgrades.js';
 import { PackStack, ZipPack } from '../assets/pack.js';
 import { BlockRegistry, type RenderableState } from '../render/registry.js';
 import { BiomeColors } from '../render/biome.js';
@@ -108,6 +109,8 @@ interface WorldScan {
   states: Set<string>;
   biomes: Set<string>;
   entityTypes: Set<string>;
+  /** block names the world has block entities for (see registry.ts addPaintedSurfaces) */
+  blockEntityBlocks: Set<string>;
   chunks: number;
 }
 
@@ -117,6 +120,7 @@ function scanRegions(worldDir: string, regions: string[]): WorldScan {
     states: new Set(['minecraft:air']),
     biomes: new Set(),
     entityTypes: new Set(),
+    blockEntityBlocks: new Set(),
     chunks: 0,
   };
   for (const name of regions) {
@@ -147,6 +151,13 @@ function scanBlockRegion(path: string, name: string, out: WorldScan): void {
     for (const s of c.sections) {
       for (const p of s.palette) out.states.add(p.key);
       for (const b of s.biomePalette) out.biomes.add(b);
+    }
+    for (const be of c.blockEntities) {
+      // Which blocks have a renderer painting on them is world data, not asset data.
+      if (typeof be.id === 'string') out.blockEntityBlocks.add(be.id);
+      // A turtle's pickaxe/modem is in its block entity, not its state. Bake a synthetic
+      // state per facing so the turtle can turn — or move, live — without a re-bake.
+      for (const k of upgradeStateKeysAllFacings(readTurtleUpgrades(be))) out.states.add(k);
     }
   });
 }
@@ -340,6 +351,7 @@ function widen(scan: WorldScan, previous: BakedAssets | null): WorldScan {
     states: new Set([...scan.states, ...Object.keys(previous.states)]),
     biomes: new Set([...scan.biomes, ...Object.keys(previous.biomes)]),
     entityTypes: new Set([...scan.entityTypes, ...(previous.entityTypes ?? [])]),
+    blockEntityBlocks: new Set([...scan.blockEntityBlocks, ...(previous.blockEntityBlocks ?? [])]),
   };
 }
 
@@ -348,7 +360,7 @@ function bake(opts: BakeOptions, scan: WorldScan): void {
   const pack = loadPacks(opts.mods, opts.client);
   const t0 = Date.now();
 
-  const registry = new BlockRegistry(pack);
+  const registry = new BlockRegistry(pack, { blockEntityBlocks: scan.blockEntityBlocks });
   const states = resolveAll(registry, scan.states);
   console.log(`baked ${states.size} states (${registry.unresolved.size} unresolved)`);
 
@@ -364,13 +376,14 @@ function bake(opts: BakeOptions, scan: WorldScan): void {
   const serialised = serialiseAll(states);
 
   const bundle: BakedAssets = {
-    version: 1,
+    version: BAKE_FORMAT,
     generated: new Date().toISOString(),
     textures: serialised.textures,
     atlas: { width: atlas.width, height: atlas.height, sprites: atlas.sprites },
     states: serialised.states,
     biomes: biomeTints(biomes, scan.biomes),
     regions,
+    blockEntityBlocks: [...scan.blockEntityBlocks].sort(),
     unresolved: [...registry.unresolved],
     missingSprites: atlas.missing,
     entityTypes: [...scan.entityTypes].sort(),

@@ -12,6 +12,7 @@
  */
 
 import { unzipSync, type Unzipped } from 'fflate';
+import { BuiltinPack } from './builtin-pack.js';
 
 export interface Pack {
   readonly name: string;
@@ -63,7 +64,10 @@ export class ZipPack implements Pack {
  */
 export function defaultFilter(name: string): boolean {
   if (name.startsWith('data/') || name.includes('/worldgen/biome/')) {
-    return name.includes('/worldgen/biome/') && name.endsWith('.json');
+    // Turtle upgrade DEFINITIONS (`type` + `item`) are data, not assets, and decide which
+    // model a turtle's pickaxe or modem is drawn with — see render/turtle-upgrades.ts.
+    return (name.includes('/worldgen/biome/') || name.includes('/computercraft/turtle_upgrade/'))
+      && name.endsWith('.json');
   }
   if (!name.startsWith('assets/')) return false;
   return (
@@ -77,8 +81,12 @@ export function defaultFilter(name: string): boolean {
 
 export class PackStack implements Pack {
   readonly name = 'stack';
-  /** lowest priority first */
-  readonly packs: Pack[] = [];
+  /**
+   * Lowest priority first. Every stack starts with the renderer's own synthesised sprites
+   * (builtin-pack.ts) underneath everything else, so the geometry that references them
+   * bakes identically on the server, in the browser's jar fallback and in the audit.
+   */
+  readonly packs: Pack[] = [new BuiltinPack()];
 
   add(p: Pack): this {
     this.packs.push(p);

@@ -15,7 +15,7 @@ import { BlockRegistry } from '../render/registry.js';
 import {
   makeContext, meshSection, type MeshContext, type StateSource,
 } from '../render/mesher.js';
-import { Viewer } from '../render/viewer.js';
+import { UNLOAD_DISTANCE, Viewer } from '../render/viewer.js';
 import { World } from '../render/world.js';
 import { RegionFile } from '../core/region.js';
 import { decodeContraption, isContraptionId, meshBlockSet, classifyEntity } from '../render/entities.js';
@@ -31,6 +31,10 @@ import { BakeRefresh } from './bake-refresh.js';
 import { PLAYER_TYPE, withPlayerModel } from '../render/player-model.js';
 import { JoinButton } from './join-button.js';
 import { LiveView } from './live-view.js';
+import { fetchSpawn, type SpawnPoint } from './world-spawn.js';
+import { ChunkStreamer, parseStreamParam } from './chunk-stream.js';
+import { httpRangeFetch } from './region-sync.js';
+import type { ChunkColumn } from '../render/world.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
@@ -138,6 +142,15 @@ let shaders: ShaderView | null = null;
 let shaderBundle: import('../shaders/bundle.js').ShaderBundle | null = null;
 
 /**
+ * Chunk streaming (chunk-stream.ts): the world arrives nearest-first around the camera
+ * over Range requests instead of as whole region files. ON by default; `?stream=0` restores
+ * the whole-region load (which drag-and-drop and the jar path still use), `?stream=<n>`
+ * sets the load radius in chunks. Null when streaming is off or has not started.
+ */
+let streamer: ChunkStreamer | null = null;
+const streamParam = parseStreamParam(new URLSearchParams(location.search).get('stream'));
+
+/**
  * Bring up the shaderpack path if `?shaders=<pack>` asked for it.
  *
  * Deliberately never throws: the pack is an enhancement, and every failure mode here
@@ -177,6 +190,10 @@ const diag = {
   unresolved: 0,
   biomes: 0,
   queued: 0,
+  /** queued sections within NEAR_BLOCKS of the camera; 0 means the near view is complete */
+  nearQueued: 0,
+  /** queued sections not buried below the surface; 0 means everything in view is meshed */
+  visibleQueued: 0,
   entities: 0,
   contraptions: 0,
   contraptionBlocks: 0,
@@ -250,10 +267,19 @@ function collectStateKeys(): Set<string> {
   return stateKeys;
 }
 
+/** Block names the loaded chunks have block entities for — the painted-surface rule's input. */
+function blockEntityBlocksInWorld(): Set<string> {
+  const out = new Set<string>();
+  for (const col of world.chunks.values()) {
+    for (const be of col.blockEntities.values()) if (typeof be.id === 'string') out.add(be.id);
+  }
+  return out;
+}
+
 async function prepare() {
   if (!stack) throw new Error('no asset packs loaded');
   status('resolving block models...');
-  const reg = new BlockRegistry(stack);
+  const reg = new BlockRegistry(stack, { blockEntityBlocks: blockEntityBlocksInWorld() });
   registry = reg;
 
   const sprites = reg.spritesFor(collectStateKeys());
@@ -296,53 +322,177 @@ async function prepare() {
  * distance to the camera and spend a fixed time budget per frame on it, so the first
  * visible geometry appears almost immediately and the rest fills in while you fly.
  */
-const pending: Array<{ cx: number; cy: number; cz: number; d2: number }> = [];
+interface MeshJob { cx: number; cy: number; cz: number; d2: number }
+const pending: MeshJob[] = [];
+/** `cx,cy,cz` of every job in `pending`, so a section is never queued twice */
+const pendingKeys = new Set<string>();
+/** set when jobs were pushed out of order; sorted once, at the next pump */
+let pendingUnsorted = false;
 let queueBuiltFor = { x: Infinity, z: Infinity };
 const MESH_BUDGET_MS = 8;
+/**
+ * While sections THIS close to the camera are still waiting, the budget triples. The
+ * streaming load is judged by when the view around the camera is complete, and 8 ms a
+ * frame is a fine steady-state rate that makes a poor opening one.
+ */
+const NEAR_BLOCKS = 96;
+const NEAR_BUDGET_MS = 24;
 /** sections further than this (in blocks) are not meshed at all */
 const MESH_RADIUS = 256;
+/**
+ * Added to the sort key of a section buried under its column's surface while the camera is
+ * above that surface. Larger than MESH_RADIUS squared, so every section that could be in
+ * view is meshed before any that cannot: from the air, the 15 underground sections of a
+ * column are three quarters of the meshing work and none of the picture. They still mesh
+ * (caves seen through an opening fill in last), and a camera that goes underground
+ * re-queues without the penalty on its next rebuild.
+ */
+const BURIED_PENALTY = 400 * 400;
+
+function sectionD2(cx: number, cy: number, cz: number): number {
+  const cam = viewer.camera.position;
+  const dx = cx * 16 + 8 - cam.x;
+  const dy = cy * 16 + 8 - cam.y;
+  const dz = cz * 16 + 8 - cam.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function pushJob(cx: number, cy: number, cz: number, d2: number): void {
+  const key = `${cx},${cy},${cz}`;
+  if (pendingKeys.has(key)) return;
+  pendingKeys.add(key);
+  pending.push({ cx, cy, cz, d2 });
+  pendingUnsorted = true;
+}
 
 function rebuildQueue() {
   if (!ctx) return;
   const cam = viewer.camera.position;
   pending.length = 0;
-  for (const col of world.chunks.values()) {
-    for (const sy of col.sections.keys()) {
-      const key = `${col.x},${sy},${col.z}`;
-      if (viewer.hasSection(key)) continue;
-      const dx = col.x * 16 + 8 - cam.x;
-      const dy = sy * 16 + 8 - cam.y;
-      const dz = col.z * 16 + 8 - cam.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 > MESH_RADIUS * MESH_RADIUS) continue;
-      pending.push({ cx: col.x, cy: sy, cz: col.z, d2 });
+  pendingKeys.clear();
+  for (const col of world.chunks.values()) enqueueColumn(col, false);
+  pending.sort((a, b) => b.d2 - a.d2); // pop() takes the nearest
+  pendingUnsorted = false;
+  queueBuiltFor = { x: cam.x, z: cam.z };
+  // The camera has moved: sections it left far behind are disposed, and will be re-queued
+  // by a later rebuild if it comes back within MESH_RADIUS of them.
+  viewer.dropSectionsBeyond(UNLOAD_DISTANCE);
+}
+
+/**
+ * Queue a column's unmeshed sections. Called for every column on a rebuild and, on the
+ * streaming path, for each column as it arrives — so meshing starts the moment the first
+ * chunk lands rather than after the last one.
+ *
+ * `withNeighbours` also re-queues the ALREADY MESHED sections of the eight surrounding
+ * columns at the same heights. They were built while this column was absent, so their
+ * faces toward it were left uncovered and lit as open sky; a column arriving at the edge
+ * of the load radius would otherwise leave a bright seam that never heals.
+ */
+function enqueueColumn(col: ChunkColumn, withNeighbours: boolean): void {
+  const r2 = MESH_RADIUS * MESH_RADIUS;
+  const top = topSection(col);
+  const camY = viewer.camera.position.y;
+  for (const sy of col.sections.keys()) {
+    const d2 = sectionD2(col.x, sy, col.z);
+    if (d2 > r2) continue;
+    const buried = sy < top - 1 && camY > (sy + 1) * 16;
+    if (!viewer.hasSection(`${col.x},${sy},${col.z}`)) pushJob(col.x, sy, col.z, buried ? d2 + BURIED_PENALTY : d2);
+    if (!withNeighbours) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (!dx && !dz) continue;
+        const nx = col.x + dx;
+        const nz = col.z + dz;
+        if (viewer.hasSection(`${nx},${sy},${nz}`)) pushJob(nx, sy, nz, sectionD2(nx, sy, nz));
+      }
     }
   }
-  pending.sort((a, b) => b.d2 - a.d2); // pop() takes the nearest
-  queueBuiltFor = { x: cam.x, z: cam.z };
+}
+
+/** The highest section of a column holding anything but air; -Infinity for an empty column. */
+function topSection(col: ChunkColumn): number {
+  let top = -Infinity;
+  for (const s of col.sections.values()) if ((s.ids || s.uniform !== 0) && s.y > top) top = s.y;
+  return top;
+}
+
+/**
+ * Whether a section may be meshed yet. Face culling, AO and smooth lighting all read the
+ * neighbouring columns, so on the streaming path a section waits until the eight around
+ * it have either arrived or are known not to be coming (absent, out of range, unreadable).
+ * Without streaming everything is loaded up front and nothing waits.
+ */
+function neighboursSettled(cx: number, cz: number): boolean {
+  if (!streamer) return true;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if ((dx || dz) && !streamer.isSettled(cx + dx, cz + dz)) return false;
+    }
+  }
+  return true;
+}
+
+/** Follow the camera: tell the streamer, re-sort a queue pushed to out of order, rebuild a stale one. */
+function maintainQueue(): void {
+  const cam = viewer.camera.position;
+  streamer?.setCamera(cam.x, cam.z);
+  // Re-sort when the camera has moved far enough that the ordering is stale.
+  const moved = Math.hypot(cam.x - queueBuiltFor.x, cam.z - queueBuiltFor.z);
+  if (moved > 48) rebuildQueue();
+  else if (pendingUnsorted) {
+    pending.sort((a, b) => b.d2 - a.d2);
+    pendingUnsorted = false;
+  }
+}
+
+function meshBudgetMs(): number {
+  const nearest = pending[pending.length - 1];
+  return nearest && nearest.d2 < NEAR_BLOCKS * NEAR_BLOCKS ? NEAR_BUDGET_MS : MESH_BUDGET_MS;
 }
 
 function pumpMeshing() {
   if (!ctx) return;
-  const cam = viewer.camera.position;
-  // Re-sort when the camera has moved far enough that the ordering is stale.
-  const moved = Math.hypot(cam.x - queueBuiltFor.x, cam.z - queueBuiltFor.z);
-  if (moved > 48) rebuildQueue();
-
-  const deadline = performance.now() + MESH_BUDGET_MS;
+  maintainQueue();
+  const start = performance.now();
+  const deadline = start + meshBudgetMs();
+  const deferred: MeshJob[] = [];
   let done = 0;
   while (pending.length && performance.now() < deadline) {
     const job = pending.pop()!;
-    const mesh = meshSection(ctx, job.cx, job.cy, job.cz);
-    if (mesh) {
-      viewer.addSection(mesh);
-      shaders?.addSection(mesh);
-      diag.sections++;
-    }
-    done++;
+    if (world.getChunk(job.cx, job.cz) && !neighboursSettled(job.cx, job.cz)) { deferred.push(job); continue; }
+    if (meshJob(job)) done++;
   }
-  if (done) diag.meshMs = performance.now() - (deadline - MESH_BUDGET_MS);
+  // Deferred jobs were popped nearest-first, so putting them back on top keeps the order.
+  for (let i = deferred.length - 1; i >= 0; i--) pending.push(deferred[i]);
+  if (done) diag.meshMs = performance.now() - start;
   diag.queued = pending.length;
+  diag.nearQueued = queuedUnder(NEAR_BLOCKS * NEAR_BLOCKS);
+  diag.visibleQueued = queuedUnder(BURIED_PENALTY);
+}
+
+/**
+ * Queued sections whose sort key is under `d2` — under NEAR_BLOCKS squared: "is the view
+ * around the camera complete yet"; under BURIED_PENALTY: "is everything that can be seen
+ * from here meshed yet". The queue is sorted, so this walks only the head.
+ */
+function queuedUnder(d2: number): number {
+  let n = 0;
+  for (let i = pending.length - 1; i >= 0 && pending[i].d2 < d2; i--) n++;
+  return n;
+}
+
+/** Mesh one queued section; false when its column has been unloaded meanwhile. */
+function meshJob(job: MeshJob): boolean {
+  pendingKeys.delete(`${job.cx},${job.cy},${job.cz}`);
+  if (!ctx || !world.getChunk(job.cx, job.cz)) return false;
+  const mesh = meshSection(ctx, job.cx, job.cy, job.cz);
+  if (mesh) {
+    viewer.addSection(mesh);
+    shaders?.addSection(mesh);
+    diag.sections++;
+  }
+  return true;
 }
 
 /** Entities live in a parallel `entities/r.X.Z.mca` region since 1.17. */
@@ -506,37 +656,78 @@ function cachedEntityMesh(
   return usable;
 }
 
+/** How far back from the world spawn the camera opens; a settlement, not one block. */
+const SPAWN_VIEW_DIST = 20;
+
 /**
- * Drop the camera just above the highest solid block near the region centre, or at an
- * explicit `?at=x,y,z[,dist]` for reproducible screenshots of a specific feature.
+ * Open on an explicit `?at=x,y,z[,dist]` (reproducible screenshots of a specific feature),
+ * else on the world's own spawn point from level.dat, else — a world with no readable
+ * spawn — just above the highest solid block of the first chunk loaded.
  */
-function placeCamera() {
-  const at = new URLSearchParams(location.search).get('at');
-  if (at) {
-    const n = at.split(',').map(Number);
-    const dist = n[3] ?? 12;
-    viewer.camera.position.set(n[0] + dist, n[1] + dist * 0.5, n[2] + dist);
-    controls.lookAt(n[0], n[1], n[2]);
+function placeCamera(firstRegion?: string) {
+  const target = cameraTarget();
+  if (target) {
+    const { x, y, z, dist, yaw } = target;
+    // yaw is the compass bearing the camera sits at, in degrees clockwise from +Z (south),
+    // so 45 is the historical "+X +Z" corner and 225 looks at a block's north-west faces.
+    const r = dist * Math.SQRT2;
+    const a = (yaw * Math.PI) / 180;
+    viewer.camera.position.set(x + r * Math.sin(a), y + dist * 0.5, z + r * Math.cos(a));
+    controls.lookAt(x, y, z);
     controls.speed = 10;
     return;
   }
-  let best: { x: number; y: number; z: number } | null = null;
-  for (const col of world.chunks.values()) {
-    for (let sy = 20; sy >= -4; sy--) {
-      const s = col.sections.get(sy);
-      if (!s) continue;
-      if (!s.ids && s.uniform === 0) continue;
-      best = { x: col.x * 16 + 8, y: sy * 16 + 40, z: col.z * 16 + 8 };
-      break;
-    }
-    if (best) break;
-  }
-  const p = best ?? { x: 0, y: 120, z: 0 };
+  const p = highestLoadedSurface() ?? regionCentre(firstRegion) ?? { x: 0, y: 120, z: 0 };
   viewer.camera.position.set(p.x, p.y, p.z);
   // FlyControls owns the camera rotation, so seed its yaw/pitch rather than calling
   // camera.lookAt (which the next controls.update would immediately overwrite).
   controls.lookAt(p.x + 40, p.y - 25, p.z + 40);
 }
+
+/** Just above the highest non-air section of the first loaded chunk; null with none loaded. */
+function highestLoadedSurface(): { x: number; y: number; z: number } | null {
+  for (const col of world.chunks.values()) {
+    for (let sy = 20; sy >= -4; sy--) {
+      const s = col.sections.get(sy);
+      if (!s) continue;
+      if (!s.ids && s.uniform === 0) continue;
+      return { x: col.x * 16 + 8, y: sy * 16 + 40, z: col.z * 16 + 8 };
+    }
+  }
+  return null;
+}
+
+/**
+ * The middle of a region. On the streaming path nothing is loaded when the camera is
+ * placed, so with no spawn and no `?at=` it opens over the first served region, not 0,0.
+ */
+function regionCentre(name?: string): { x: number; y: number; z: number } | null {
+  const rc = name ? RegionFile.parseName(name) : null;
+  return rc ? { x: rc.x * 512 + 256, y: 120, z: rc.z * 512 + 256 } : null;
+}
+
+interface CameraTarget { x: number; y: number; z: number; dist: number; yaw: number }
+
+/** `?at=` wins over the world spawn; null means neither is usable. */
+function cameraTarget(): CameraTarget | null {
+  const at = new URLSearchParams(location.search).get('at');
+  if (at) return parseAt(at);
+  return worldSpawn ? { ...worldSpawn, dist: SPAWN_VIEW_DIST, yaw: 45 } : null;
+}
+
+/** `x,y,z[,dist[,yaw]]` from the URL; null when it is not three numbers. */
+function parseAt(at: string): CameraTarget | null {
+  const n = at.split(',').map(Number);
+  if (n.length < 3 || n.slice(0, 3).some((v) => !Number.isFinite(v))) return null;
+  return {
+    x: n[0], y: n[1], z: n[2],
+    dist: Number.isFinite(n[3]) ? n[3] : 12,
+    yaw: Number.isFinite(n[4]) ? n[4] : 45,
+  };
+}
+
+/** The world's spawn point, read once at boot from the served level.dat; null if unreadable. */
+let worldSpawn: SpawnPoint | null = null;
 
 // ---------------------------------------------------------------------------
 // Input paths
@@ -582,6 +773,11 @@ async function autoLoadBaked(): Promise<boolean> {
   registry = baked.registry;
   status(`baked assets: ${baked.stateCount} states, ${baked.atlas.sprites.size} sprites`);
 
+  if (streamParam.enabled) {
+    await startStreaming(baked);
+    return true;
+  }
+
   for (const rg of baked.regions) {
     const r = await fetch('/dev/region/' + encodeURIComponent(rg));
     if (!r.ok) continue;
@@ -604,6 +800,63 @@ async function autoLoadBaked(): Promise<boolean> {
   renderEntities();
   rebuildQueue();
   return true;
+}
+
+/**
+ * The streaming load. Everything that does not need the world is set up first (bake,
+ * shaders, mob models, camera), then the streamer reads the 8 KB index of each region
+ * and starts fetching around the camera; each chunk is added to the world and its
+ * sections queued for meshing as it lands. The entity regions (under 1 MB) load in
+ * parallel and draw when they are done rather than holding up the first frame.
+ */
+async function startStreaming(baked: ServedAssets): Promise<void> {
+  await startShaders();
+  status('loading extracted entity models...');
+  entityModels = await loadModelsWithPlayer();
+  applyBaked(baked);
+  bakeRefresh = new BakeRefresh(baked.generated);
+  for (const rg of baked.regions) loadedRegions.add(rg);
+  placeCamera(baked.regions[0]);
+
+  const t0 = performance.now();
+  let reported = false;
+  const s = new ChunkStreamer(baked.regions, {
+    fetchRange: httpRangeFetch('/dev/region'),
+    onChunk: (root, cx, cz) => {
+      let col: ChunkColumn;
+      try {
+        col = world.addChunk(root);
+      } catch (err) {
+        console.warn(`chunk ${cx},${cz}:`, (err as Error).message);
+        return;
+      }
+      diag.chunks = world.chunks.size;
+      enqueueColumn(col, true);
+      live?.noteColumn(col);
+    },
+    onUnload: (cx, cz) => {
+      const col = world.getChunk(cx, cz);
+      if (col) for (const sy of col.sections.keys()) viewer.removeSection(`${cx},${sy},${cz}`);
+      world.removeChunk(cx, cz);
+      diag.chunks = world.chunks.size;
+    },
+    onProgress: (st) => {
+      if (reported || st.queued || st.inFlight) return;
+      reported = true;
+      status(`streamed ${st.fetched} chunks (${(st.bytes / 1048576).toFixed(1)} MB, ${st.requests} requests)`
+        + ` in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    },
+  }, streamParam.loadRadius ? { loadRadius: streamParam.loadRadius, unloadRadius: streamParam.loadRadius + 8 } : {});
+  streamer = s;
+  (globalThis as Record<string, unknown>).__mcwvStream = { stats: () => ({ ...s.stats }), streamer: s };
+  const cam = viewer.camera.position;
+  status(`streaming chunks around ${cam.x.toFixed(0)},${cam.z.toFixed(0)}...`);
+  await s.start(cam.x, cam.z);
+
+  void Promise.all(baked.regions.map(async (rg) => {
+    const r = await fetch('/dev/entities/' + encodeURIComponent(rg)).catch(() => null);
+    if (r?.ok) await loadEntityRegion(new Uint8Array(await r.arrayBuffer()), rg);
+  })).then(() => renderEntities());
 }
 
 /** Make a served bundle THE bundle: registry, atlas, tints, mesh context, diagnostics. */
@@ -673,6 +926,9 @@ function pollBakeRefresh(now: number): void {
 }
 
 async function autoLoad() {
+  // Before either load path: both end in placeCamera(), which wants to know where the
+  // world starts. A few hundred bytes of NBT, and null on any failure keeps the old fallback.
+  worldSpawn = await fetchSpawn();
   if (await autoLoadBaked()) return;
   status('no baked assets served — falling back to fetching jars');
   const manifest = await fetchManifest();
@@ -764,6 +1020,12 @@ async function startObserving(url: string) {
     hudRoot: document.body,
     status,
     fly: controls,
+    // Streaming: a flush only re-reads chunks that are on screen, and afterwards the
+    // streamer re-reads its index so a chunk the flush moved in the file is not fetched
+    // from its old offset.
+    chunkFilter: streamer ? (cx, cz) => streamer!.isLoaded(cx, cz) : undefined,
+    onSynced: streamer ? () => void streamer!.refreshIndex() : undefined,
+    onIngest: streamer ? (cx, cz) => streamer!.noteLoaded(cx, cz) : undefined,
   });
   live.onControlChange = (control) => {
     joinButton.render(control, true);
@@ -795,8 +1057,16 @@ function worldHud(
     + shaderHud(shaderStats)
     + (diag.entitiesDrawn ? ` | ${diag.entitiesDrawn} mobs` : '')
     + (diag.queued ? ` | ${diag.queued} queued` : '')
+    + streamHud()
     + unresolvedHud()
     + (live?.hudLine() ?? '');
+}
+
+function streamHud(): string {
+  const st = streamer?.stats;
+  if (!st) return '';
+  const busy = st.queued + st.inFlight;
+  return busy ? ` | streaming ${busy}` : '';
 }
 
 /**
@@ -843,6 +1113,7 @@ function frame() {
   // WebGPU reports validation errors asynchronously, so the panel has to be re-read
   // periodically rather than written once at startup.
   if (shaders && ++panelTick % 120 === 0) shaders.refreshPanel();
+  viewer.cullByDistance();
   const stats = shaderStats ? viewer.statsOnly() : viewer.render();
   hud.textContent = worldHud(stats, shaderStats);
   requestAnimationFrame(frame);

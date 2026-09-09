@@ -130,6 +130,13 @@ const SNAP_BLOCKS = 4;
  */
 export interface TrackOptions {
   holdLost?: boolean;
+  /**
+   * With `holdLost`: how long a track that dropped out of the roster is held before it is
+   * forgotten. A turtle in an unloaded chunk drops out of `computercraft dump` and comes
+   * back, so it is held (stale) — but a turtle that was removed from the world never comes
+   * back, and holding it for ever draws a turtle that is not there. Unset holds indefinitely.
+   */
+  holdLostMs?: number;
 }
 
 interface Track {
@@ -248,6 +255,10 @@ export class PlayerTracks {
     const renderAt = now - this.delayMs;
     const out: TrackPose[] = [];
     for (const [name, track] of this.tracks) {
+      if (this.heldTooLong(track, now)) {
+        this.tracks.delete(name);
+        continue;
+      }
       const target = sampleAt(track, renderAt);
       if (!target) {
         // Departed AND played out. This is the only place a track is forgotten, so a player
@@ -264,6 +275,19 @@ export class PlayerTracks {
       out.push(this.ease(name, track, target, dt, now));
     }
     return out;
+  }
+
+  private heldTooLong(track: Track, now: number): boolean {
+    const limit = this.opts.holdLostMs;
+    return limit !== undefined && track.lostAt !== null && now - track.lostAt > limit;
+  }
+
+  /**
+   * Drop a track at once — the world itself says the thing is gone (its block entity is no
+   * longer in a re-read chunk), so there is nothing to hold for.
+   */
+  forget(name: string): void {
+    this.tracks.delete(name);
   }
 
   private ease(

@@ -16,6 +16,7 @@
  */
 
 import { DIR_VEC, DIRECTIONS, type BakedQuad, type Direction } from '../assets/model.js';
+import { readTurtleUpgrades, upgradeStateKeys } from './turtle-upgrades.js';
 import type { RenderableState } from './registry.js';
 import type { TextureAtlas } from './atlas.js';
 
@@ -103,12 +104,8 @@ interface QuadInput {
   uvs: Float32Array;
   rgba: Float32Array;
   flipDiagonal: boolean;
-  /**
-   * Which way this face points out of the block, derived from the quad's own geometry.
-   * Null when the quad passes through the block centre (cross models), where "outward"
-   * is meaningless and the original corner order must be kept.
-   */
-  outward: readonly [number, number, number] | null;
+  /** Which way this face points out of the block — see quadOutward(). */
+  outward: readonly [number, number, number];
   /** shaderpack mode only */
   shader?: {
     blockLight: number;
@@ -149,7 +146,7 @@ class LayerBuilder {
     //
     // Vanilla flips the triangulation diagonal when AO is asymmetric, otherwise the
     // shading gradient bends visibly across the quad.
-    const reversed = outward !== null && facesInward(p, outward);
+    const reversed = facesInward(p, outward);
     this.pushIndices(base, flipDiagonal, reversed);
     this.vertices += 4;
   }
@@ -240,18 +237,24 @@ function stateOf(ctx: MeshContext, id: number): RenderableState {
 }
 
 /**
- * Which way the quad faces out of its block: its centre relative to the block centre.
+ * Which way the quad faces out of its block.
  *
- * NOT `DIR_VEC[q.facing]`. The `facing` enum goes stale under variant rotation — a chest
- * at `facing=west` reports `north` on a quad whose geometry points west — which makes the
- * dot product against it exactly zero, and float noise then reverses an arbitrary subset
- * of that block's quads. Deriving the direction from the rotated positions cannot
- * disagree with the geometry it is being compared to.
+ * First choice: the quad's centre relative to the block centre. It is derived from the
+ * rotated positions, so it cannot disagree with the geometry it is compared against —
+ * `facing` can: a chest at `facing=west` reports `north` on a quad whose geometry points
+ * west, because its yaw is an element rotation that `facing` does not follow.
  *
- * Returns null for a quad centred on the block centre (the two planes of a cross model),
- * where there is no outside and the corner order must be left alone.
+ * But the centre offset says nothing about a face that passes THROUGH the block centre,
+ * or whose offset is perpendicular to it: the top of a bottom slab (centre y = 0.5), the
+ * riser of a stair (offset straight up, face pointing sideways), the planes of a cross
+ * model. Those used to be left to the fixed corner order, and the fixed order back-face
+ * culls horizontal faces — so every slab top and stair step rendered as a hole. For them
+ * the declared `facing` is the right answer: slabs and stairs carry no element rotation,
+ * and the element rotations that DO exist (the 45-degree cross) cannot turn a face far
+ * enough to flip the sign of its dot product with the unrotated direction.
  */
-function quadOutward(p: Float32Array): [number, number, number] | null {
+export function quadOutward(q: BakedQuad): [number, number, number] {
+  const p = q.positions;
   let x = 0;
   let y = 0;
   let z = 0;
@@ -264,7 +267,21 @@ function quadOutward(p: Float32Array): [number, number, number] | null {
   const ox = x / 4 - 0.5;
   const oy = y / 4 - 0.5;
   const oz = z / 4 - 0.5;
-  return Math.hypot(ox, oy, oz) < 1e-4 ? null : [ox, oy, oz];
+  // The offset only tells the two sides of this face apart if it has a component along
+  // the face's own normal (from the triangle the mesher emits, either sign).
+  const ax = p[3] - p[0], ay = p[4] - p[1], az = p[5] - p[2];
+  const bx = p[6] - p[0], by = p[7] - p[1], bz = p[8] - p[2];
+  const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+  //
+  // Both tests are ABSOLUTE. A cross plane's centre misses the block centre by float noise
+  // (1e-8), and a relative test happily accepted that noise as a direction — which flipped
+  // one face of every grass tuft at random, left the tuft visible from one side only and
+  // z-fighting its own twin from the other. Block space is 0..1, so 1e-4 is far below any
+  // real offset and far above any noise.
+  const along = Math.abs(nx * ox + ny * oy + nz * oz);
+  const len = Math.hypot(nx, ny, nz);
+  if (Math.hypot(ox, oy, oz) > 1e-4 && len > 0 && along > 1e-4 * len) return [ox, oy, oz];
+  return DIR_VEC[q.facing];
 }
 
 /**
@@ -414,7 +431,7 @@ function emitBlock(ctx: MeshContext, b: BlockCtx, getBuilder: (l: Layer) => Laye
       uvs: auv,
       rgba,
       flipDiagonal: flip,
-      outward: quadOutward(q.positions),
+      outward: quadOutward(q),
       shader: ctx.blockIdOf
         ? {
           blockLight: packedLight & 0xf,
@@ -481,9 +498,58 @@ export function meshSection(
       getBuilder,
     );
   }
+  quadCount += emitUpgrades(ctx, { section, hidden: hiddenHere, cx, cy, cz }, getBuilder);
 
   const layers = buildLayers(builders);
   return layers ? { cx, cy, cz, layers, quadCount } : null;
+}
+
+interface SectionScope {
+  section: StoredSection;
+  hidden: ReturnType<typeof hiddenIn>;
+  cx: number;
+  cy: number;
+  cz: number;
+}
+
+/**
+ * What a turtle carries is in its block entity, not its state. Walk the column's block
+ * entities that fall in this section; any with `LeftUpgrade`/`RightUpgrade` (the CC:T API's
+ * fields — no block name is checked) gets each upgrade's synthetic state emitted at the
+ * entity's own position, facing as the block there faces. A hidden block (a live turtle
+ * drawn elsewhere) takes its upgrades with it.
+ */
+function emitUpgrades(ctx: MeshContext, scope: SectionScope, getBuilder: (l: Layer) => LayerBuilder): number {
+  const col = ctx.world.getChunk(scope.cx, scope.cz);
+  if (!col || col.blockEntities.size === 0) return 0;
+  const baseY = scope.cy << 4;
+  let n = 0;
+  for (const be of col.blockEntities.values()) {
+    const wy = be.y as number;
+    if (typeof wy !== 'number' || wy < baseY || wy >= baseY + 16) continue;
+    const ups = readTurtleUpgrades(be);
+    if (ups) n += emitEntityUpgrades(ctx, scope, { wx: be.x as number, wy, wz: be.z as number, ups }, getBuilder);
+  }
+  return n;
+}
+
+function emitEntityUpgrades(
+  ctx: MeshContext,
+  scope: SectionScope,
+  at: { wx: number; wy: number; wz: number; ups: NonNullable<ReturnType<typeof readTurtleUpgrades>> },
+  getBuilder: (l: Layer) => LayerBuilder,
+): number {
+  const { wx, wy, wz, ups } = at;
+  const lx = wx & 15, ly = wy & 15, lz = wz & 15;
+  const id = blockIdAt(scope.section, scope.hidden, (ly << 8) | (lz << 4) | lx);
+  if (id === AIR_ID) return 0;
+  const host = stateOf(ctx, id);
+  let n = 0;
+  for (const key of upgradeStateKeys(host.props.facing ?? 'north', ups)) {
+    const state = ctx.registry.resolve(key);
+    if (state.quads.length) n += emitBlock(ctx, { state, wx, wy, wz, lx, ly, lz, tint: NO_TINT }, getBuilder);
+  }
+  return n;
 }
 
 function buildLayers(

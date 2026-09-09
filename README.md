@@ -33,10 +33,44 @@ their reasons, and an explicit list of what was rejected and why.
 - **Custom model loaders** — `neoforge:obj` (Create's crushing wheels, water wheels,
   bogeys), `neoforge:composite`, `computercraft:turtle`, with documented static fallbacks
   for `fusion:model` and `domum_ornamentum:materially_textured`.
+- **Painted surfaces, structurally** — a full-cube block the world has a block entity for,
+  with a see-through face, is a surface its renderer paints (a ComputerCraft monitor's
+  screen). Every such face gets a dark backdrop and counts as opaque for occlusion. The rule
+  reads block-entity presence from the region files and alpha from the textures; no block
+  or mod is named. What a program has DRAWN on a monitor is not in the save or reachable
+  over RCON, so screens stay blank until a feed supplies text (below).
+- **Turtle upgrades, generically** — any block entity with `LeftUpgrade`/`RightUpgrade`
+  (the CC:T API's fields) is a turtle; each upgrade bakes as a synthetic state per facing.
+  Its model is found from data alone: the upgrade definition (`data/<ns>/computercraft/
+  turtle_upgrade/*.json`), then a sided model by the convention every mod that ships one
+  follows (`<ns>:block/turtle_<name>_<side>` — CC:T's speaker and workbench, Advanced
+  Peripherals' scanners), else the item's own model: a generated item stood flat on the
+  side at CC:T's 0.4065 offset, a block item (a modem) fitted into the mod's own
+  `turtle_upgrade_base_<side>` footprint. Live turtles carry the last block entity seen
+  for their computer id.
+- **Monitor text** — the game offers no read path for a terminal (the block entity saves
+  only size/index; no RCON command reads one; a real client on the mod's channel needs a
+  NeoForge handshake and a Microsoft account), so the text comes from the computers
+  themselves: a program writes what it shows to `screen.json` in its own save folder
+  (`computercraft/computer/<id>/`, `{label, lines[], updated}`), served read-only at
+  `/dev/computercraft/computer/<id>/screen.json`, and the page paints it on the monitor
+  panel touching that computer's block — found from the region data (CC:T's edge letters in
+  each monitor's `state` give the top-left, width and height), never configured. The bridge's
+  JSON feed (`MCWV_MONITORS_URL`) remains as a fallback for panels no file covers.
+- **View distance** — sections beyond `RENDER_DISTANCE` (384 blocks, where the fog closes)
+  are hidden each frame and disposed beyond 640, on top of three.js's per-mesh frustum
+  culling, so a long flight does not accumulate every draw call ever made.
 - **Mesher** — face culling, vanilla directional shading, smooth lighting, per-vertex AO
   with vanilla's diagonal flip, three render layers with correct transparency ordering.
+  Triangle winding is derived from each quad's geometry, not from vanilla's corner order
+  (which differs between side and horizontal faces) — the same rule serves terrain, Create
+  contraptions and live turtles, so slab tops, stair steps and turtle lids all face out.
 - **Renderer** — three.js, per-section BufferGeometry, frustum culling, distance-ordered
   chunk streaming on a per-frame time budget.
+- **Chunk streaming** — the world is fetched nearest-first around the camera over HTTP
+  Range requests against the region files (the 8 KB header is the index; each chunk is its
+  own run of sectors), rendered as it lands, unloaded as the camera leaves it. No new server
+  format and no server code. See [Chunk streaming](#chunk-streaming).
 - **Biome tint** — data-driven from biome JSON + colormaps, works for modded biomes, and
   applied **per quad** via each face's `tintindex`, so a grass block's top and side overlay
   go green with the biome while its dirt sides stay brown.
@@ -157,7 +191,37 @@ through a read-only mount configured in `vite.config.ts`. Override with:
 MCWV_REF=/path/to/server/data MCWV_REGIONS=r.0.0.mca,r.0.1.mca npm run dev
 ```
 
-Add `&at=x,y,z,dist` to place the camera for a reproducible screenshot.
+Add `&at=x,y,z,dist[,yaw]` to place the camera for a reproducible screenshot (`yaw` is the
+bearing the camera sits at, degrees clockwise from south; default 45). Without it the
+camera opens on the **world's spawn point** — `Data.SpawnX/Y/Z` from `level.dat`, served
+read-only at `/dev/level.dat` — so the page lands where the server would put you, not on
+whichever chunk happened to load first.
+
+#### Chunk streaming
+
+The served world is not downloaded up front. The page reads each region's 8 KB header
+(one `Range: bytes=0-8191` per file — the Anvil location table already says where every
+chunk's sectors are and when it was last written), then fetches the chunks within
+**16 chunks** of the camera nearest-first, up to 6 requests in flight, with chunks stored
+adjacent in the file (within 16 KB) cut from one response. Each chunk is added to the
+world and its sections queued for meshing the moment it lands; a section waits only until
+the eight columns around it are settled, so no edge is ever lit as open sky. Loaded chunks
+more than 24 chunks away are unloaded. Priorities are recomputed when the camera has moved
+24 blocks, at most every 250 ms.
+
+Meshing is ordered for what can be seen: while sections within 96 blocks are waiting the
+per-frame budget is 24 ms rather than 8, and sections buried below their column's surface
+are meshed after everything above ground when the camera is in the air. They still mesh —
+caves seen through an opening fill in last.
+
+Live mode keeps working on top: a flush only re-reads changed chunks that are loaded, and
+the streamer re-reads its index after each sync so a chunk the server moved in the file is
+never fetched from its old offset (a decoded chunk whose `xPos`/`zPos` disagree with the
+index is discarded and re-read anyway). Live entities are unchanged.
+
+`?stream=0` restores the whole-region load; `?stream=<n>` sets the load radius in chunks.
+Drag-and-drop and the jar fallback always load whole regions, because the atlas is built
+from the palette of everything loaded.
 
 Controls, desktop: click to capture the pointer, `WASD` + `Space`/`Shift`, scroll to change
 speed, `Ctrl` to sprint.
@@ -928,6 +992,26 @@ affect the legacy jar fallback.
 
 Against the reference world on a Mac Studio M4 Max, headless Chrome (ANGLE/Metal),
 1600×1000.
+
+**Initial load, four regions served (`r.0.0`, `r.0.-1`, `r.-1.0`, `r.-1.-1`; 15.1 MB,
+2,488 chunks), camera on the world spawn, page served by the compose stack on the same
+machine.** "Near view" is every section within 96 blocks meshed; "visible view" is every
+section that can be seen from the camera within the 256-block mesh radius (buried
+sections excluded); "settled" is the whole mesh radius, underground included.
+
+| | whole-region load (`?stream=0`) | chunk streaming (default) |
+|---|---|---|
+| Region bytes on the wire | 15.1 MB, 4 requests | 6.9–8.2 MB, 118–148 requests |
+| Chunks parsed before the first frame | 2,488 | 48–270 |
+| First meshed section | 0.7–1.0 s | 0.2–0.4 s |
+| Near view complete | 0.9 s | 1.1–1.2 s |
+| Visible view complete | 2.6 s | 2.2 s (from `?at=64,66,32,90`) / 4.0 s (from spawn, against a wall) |
+| Everything in the mesh radius | 15.4–16.7 s | 8.8–15 s |
+
+The parse step is where a slower client or a VPN pays: the streaming path decodes ~800
+chunks instead of 2,488 and moves half the bytes, and both numbers scale with the load
+radius rather than with the world. The settle time is meshing, not transfer, on either
+path — it is the same 5,700 sections either way.
 
 **World scan** — 24,227 chunks across 3 dimensions in 12.1 s (~2,010 chunks/s), zero
 chunk failures. 1,265 distinct block states, 415 distinct block names, 28 block-entity

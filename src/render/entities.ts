@@ -26,7 +26,7 @@ import { canonicalStateKey } from '../core/chunk.js';
 import type { BakedQuad } from '../assets/model.js';
 import { DIR_VEC } from '../assets/model.js';
 import type { RenderableState } from './registry.js';
-import type { StateSource } from './mesher.js';
+import { facesInward, quadOutward, type StateSource } from './mesher.js';
 import type { SpriteRect, TextureAtlas } from './atlas.js';
 import type { LayerBuffers, Layer } from './mesher.js';
 
@@ -308,7 +308,18 @@ function appendQuad(bd: Builder, q: BakedQuad, b: ContraptionBlock, sprite: Spri
     bd.uv.push(sprite.u0 + q.uvs[i * 2] * su, sprite.v0 + q.uvs[i * 2 + 1] * sv);
     bd.col.push(v, v, v, 1);
   }
-  bd.idx.push(base, base + 1, base + 2, base + 2, base + 3, base);
+  // Same rule as the terrain mesher (see SectionBuilder.quad): vanilla's corner order is
+  // counter-clockwise-from-outside for the side faces but clockwise for the horizontal
+  // ones, and a variant rotation reorders corners again. A fixed index order therefore
+  // back-face-culled every top and bottom here — a live turtle drew as an open box you
+  // looked into, its lid gone and the inside of its far walls showing — while the same
+  // state meshed as terrain was fine. Deriving the winding from the geometry cannot
+  // disagree with the geometry.
+  if (facesInward(q.positions, quadOutward(q))) {
+    bd.idx.push(base + 2, base + 1, base, base, base + 3, base + 2);
+  } else {
+    bd.idx.push(base, base + 1, base + 2, base + 2, base + 3, base);
+  }
   bd.n += 4;
 }
 

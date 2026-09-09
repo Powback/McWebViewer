@@ -74,6 +74,8 @@ export interface BakedAssets {
     water: [number, number, number];
   }>;
   regions: string[];
+  /** block names the world had block entities for at bake time (painted-surface rule) */
+  blockEntityBlocks?: string[];
   unresolved: string[];
   missingSprites: string[];
   /**

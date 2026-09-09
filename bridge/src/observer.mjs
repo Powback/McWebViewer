@@ -29,6 +29,7 @@ import { FakePlayer } from './fake-player.mjs';
 import { ChatLog } from './chat-log.mjs';
 import { TURTLE_DEFAULT_MS, TurtlePoller } from './computers.mjs';
 import { HqPoller } from './hq.mjs';
+import { MonitorsPoller } from './monitors.mjs';
 import { readBlock, readInventory, readPos, readRotation, readVitals } from './player-state.mjs';
 import {
   isValidPlayerName, parseDimension, parsePlayerList, parsePos, parseRotation,
@@ -135,6 +136,14 @@ export class Observer {
       url: opts.hqUrl,
       log: (m) => this.log(m),
     });
+    // What is written on the monitors — from whoever writes it (HQ), since the game gives
+    // no read path for terminal contents. Blank until the feed exists. See monitors.mjs.
+    this.monitors = new MonitorsPoller({
+      intervalMs: opts.monitorsMs,
+      url: opts.monitorsUrl,
+      emit: (m) => this.emit(m),
+      log: (m) => this.log(m),
+    });
     // Turtles by `computercraft dump`, about once a second while somebody is watching. It
     // runs on the observe connection, serialised behind the roster poll like every other
     // read here, and owns its own guards — see computers.mjs. Each row is decorated with
@@ -180,6 +189,7 @@ export class Observer {
       chat: { available: !!this.chatLog?.available },
       turtles: this.turtles.status(),
       hq: this.hq.status(),
+      monitors: this.monitors.status(),
     };
   }
 
@@ -233,6 +243,7 @@ export class Observer {
     // HQ is a separate service, not behind RCON — poll it whenever anyone is watching, so
     // the activity labels are warm the moment the turtle stream starts.
     if (n > 0) void this.#hqLoop();
+    if (n > 0) void this.monitors.loop(() => this.#clients > 0);
     // Nobody is watching any more; do not leave a bot standing in the world.
     if (n === 0) void this.fakePlayer.leave().then(() => this.#announceControl());
   }

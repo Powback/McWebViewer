@@ -21,8 +21,29 @@ export interface WorldInventory {
   regions: readonly string[];
 }
 
+/**
+ * The bundle format the baker writes. Bump it when the BAKER's output for an unchanged
+ * world changes — a new geometry rule, a synthesised sprite, a serialisation change — so a
+ * bundle a previous build wrote is re-baked once even though the world has nothing new.
+ * Without this the set comparison below would happily keep serving stale geometry for ever.
+ *
+ *   1  original
+ *   2  block-entity overlays (a CC:T monitor bakes with its screen) + the `mcwv:` builtin
+ *      sprites they use
+ *   3  an overlaid face counts as opaque for occlusion (monitors hide their neighbours'
+ *      faces, so merged screens have no seams)
+ *   4  turtle tool upgrades bake as a single outward face (the two-faced card drew a
+ *      mirrored twin)
+ *   5  painted surfaces are a structural rule (block entity + full cube + see-through face)
+ *      and upgrade models resolve generically; flat items face image-top-forward *   6  upgrade models also match the mod's own sided models by shared name words (a
+ *      modem is CC:T's modem model again)
+ */
+export const BAKE_FORMAT = 6;
+
 /** The parts of a served `assets.json` the decision reads. */
 export interface BundleInventory {
+  /** BAKE_FORMAT of the baker that wrote it; absent in the earliest bundles. */
+  version?: number;
   states: Record<string, unknown>;
   biomes: Record<string, unknown>;
   /** Absent in bundles baked before this field existed; treated as stale once. */
@@ -45,6 +66,7 @@ export function planBake(world: WorldInventory, bundle: BundleInventory | null):
   if (!bundle) return { needed: true, reasons: ['no bundle yet'], missingStates: states };
 
   const reasons: string[] = [];
+  reasons.push(...formatReason(bundle));
   const missingStates = states.filter((k) => !has(bundle.states, k));
   if (missingStates.length) reasons.push(describe('state', missingStates));
 
@@ -64,6 +86,12 @@ export function planBake(world: WorldInventory, bundle: BundleInventory | null):
   }
 
   return { needed: reasons.length > 0, reasons, missingStates };
+}
+
+/** A bundle an older baker wrote is stale once, however complete its inventory is. */
+function formatReason(bundle: BundleInventory): string[] {
+  const v = bundle.version ?? 0;
+  return v < BAKE_FORMAT ? [`bundle format ${v} predates the baker's ${BAKE_FORMAT}`] : [];
 }
 
 function describe(kind: string, missing: readonly string[]): string {

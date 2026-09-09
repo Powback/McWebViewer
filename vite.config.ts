@@ -91,6 +91,14 @@ function devMount(): Plugin {
           res.setHeader('content-type', 'application/json');
           return send(join(process.cwd(), '.cache', 'shaderpacks', name));
         }
+        // The world's spawn point lives here (Data.SpawnX/Y/Z); the camera opens on it.
+        if (url === '/level.dat') return send(join(REF, 'world', 'level.dat'));
+        // A computer's own screen.json (monitor text it wrote); nothing else from its folder.
+        const screen = /^\/computercraft\/computer\/(\d+)\/screen\.json$/.exec(url);
+        if (screen) {
+          res.setHeader('content-type', 'application/json');
+          return send(join(REF, 'world', 'computercraft', 'computer', screen[1], 'screen.json'));
+        }
         if (url.startsWith('/region/')) {
           const name = url.slice(8);
           if (name.includes('/') || name.includes('..')) { res.statusCode = 400; return res.end(); }

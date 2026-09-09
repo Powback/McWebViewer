@@ -66,6 +66,11 @@ const CONFIG = {
   // turtle positions still stream. See hq.mjs.
   hqUrl: process.env.MCWV_HQ_URL ?? 'http://hq:4400',
   hqMs: process.env.MCWV_HQ_URL === '' ? 0 : Number(process.env.MCWV_HQ_MS ?? 1000),
+  // Monitor screen contents. Defaults to HQ's /monitors next to the label feed; any URL
+  // answering the same JSON shape works. Empty disables (screens stay blank).
+  monitorsUrl: process.env.MCWV_MONITORS_URL
+    ?? (process.env.MCWV_HQ_URL === '' ? '' : `${(process.env.MCWV_HQ_URL ?? 'http://hq:4400').replace(/\/$/, '')}/monitors`),
+  monitorsMs: Number(process.env.MCWV_MONITORS_MS ?? 2000),
   // Off unless explicitly turned on. This is the switch that decides whether a live
   // server's tick budget gets spent on the viewer at all.
   flushEnabled: process.env.MCWV_FLUSH_ENABLE === '1',
@@ -122,6 +127,8 @@ const observer = new Observer(
     turtleMs: CONFIG.turtleMs,
     hqUrl: CONFIG.hqUrl,
     hqMs: CONFIG.hqMs,
+    monitorsUrl: CONFIG.monitorsUrl,
+    monitorsMs: CONFIG.monitorsMs,
     flushEnabled: CONFIG.flushEnabled,
     flushMs: CONFIG.flushMs,
     flushSlowMs: CONFIG.flushSlowMs,
@@ -177,6 +184,9 @@ log(describeControl());
 log(observer.turtles.enabled
   ? `turtles: polling \`computercraft dump\` every ${observer.turtles.intervalMs} ms while a viewer is connected`
   : 'turtles: DISABLED (MCWV_TURTLE_MS=0) — turtles move only when their chunk is flushed and re-read');
+log(observer.monitors.enabled
+  ? `monitor screens: polling ${observer.monitors.url} every ${observer.monitors.intervalMs} ms (blank until it answers)`
+  : 'monitor screens: DISABLED (set MCWV_MONITORS_URL) — monitors render blank');
 log(observer.hq.enabled
   ? `turtle labels: polling HQ ${observer.hq.url}/invoke every ${observer.hq.intervalMs} ms (fleet.status)`
   : 'turtle labels: DISABLED (set MCWV_HQ_URL) — turtles show their id with no activity');

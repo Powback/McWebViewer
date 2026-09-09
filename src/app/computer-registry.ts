@@ -22,6 +22,7 @@
 
 import type { ChunkColumn } from '../render/world.js';
 import type { NbtCompound } from '../core/nbt.js';
+import { readTurtleUpgrades, upgradeStateKeys, type TurtleUpgrades } from '../render/turtle-upgrades.js';
 
 export type ComputerKind = 'turtle' | 'computer';
 
@@ -36,6 +37,8 @@ export interface KnownComputer {
   pos: [number, number, number];
   /** yaw of the saved block's `facing`, in the marker's convention; null when there is none */
   facingYawDeg: number | null;
+  /** what a turtle carries on each side (its block entity's Left/RightUpgrade); null if bare */
+  upgrades: TurtleUpgrades | null;
 }
 
 /** The turtle drawn for an id the save files have not described yet. */
@@ -130,6 +133,34 @@ export function turtleTagText(
   return act ? `${head} · ${truncate(act, max)}` : head;
 }
 
+/**
+ * The word after the name. HQ's line when it has one; otherwise the state the dump gives us
+ * — `idle` for a computer that is on with nothing reported, `off` for one that is off. A
+ * tag never shows a bare name: no status is itself a status, and it is said.
+ */
+export function turtleActivity(hqActivity: string | null | undefined, on: boolean): string {
+  const a = hqActivity?.trim();
+  if (a) return a;
+  return on ? 'idle' : 'off';
+}
+
+/** The bar colour under a turtle tag, from its activity word: what the bar means is what the text says. */
+export function turtleStateColor(activity: string): string {
+  const word = activity.split(' · ').pop()?.trim().toLowerCase() ?? '';
+  if (word === 'off' || word === 'offline') return TURTLE_COLORS.off;
+  if (word === 'idle' || word === '') return TURTLE_COLORS.idle;
+  return TURTLE_COLORS.working;
+}
+
+export const TURTLE_COLORS = {
+  /** HQ reports a job line */
+  working: 'hsl(130, 70%, 55%)',
+  /** on, nothing reported */
+  idle: 'hsl(0, 0%, 72%)',
+  /** the dump says it is off */
+  off: 'hsl(0, 70%, 55%)',
+} as const;
+
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
 }
@@ -146,13 +177,24 @@ export class ComputerRegistry {
    */
   absorb(col: ChunkColumn, stateKeyAt: StateAt): number[] {
     const changed: number[] = [];
+    const present = new Set<number>();
     for (const be of col.blockEntities.values()) {
       const next = recordOf(be, stateKeyAt);
       if (!next) continue;
+      present.add(next.id);
       const prev = this.known.get(next.id);
       if (prev && sameRecord(prev, next)) continue;
       this.known.set(next.id, next);
       changed.push(next.id);
+    }
+    // A computer whose saved block was in THIS column and is not in it any more has been
+    // removed from the world (a turtle broken, a debug computer `setblock`ed away). Forget
+    // it, and report it, so the live marker goes with the block rather than outliving it.
+    for (const [id, k] of this.known) {
+      if (present.has(id)) continue;
+      if ((k.pos[0] >> 4) !== col.x || (k.pos[2] >> 4) !== col.z) continue;
+      this.known.delete(id);
+      changed.push(id);
     }
     return changed;
   }
@@ -177,6 +219,14 @@ export class ComputerRegistry {
     const k = this.known.get(id);
     const block = k && k.kind === 'turtle' ? k.blockId : DEFAULT_TURTLE_BLOCK;
     return `${block}[facing=north,waterlogged=false]`;
+  }
+
+  /**
+   * The marker plus its upgrades — the last block entity seen for this computer id says
+   * what it carries, and the live position stream says where to draw it.
+   */
+  markerStates(id: number): string[] {
+    return [this.markerState(id), ...upgradeStateKeys('north', this.known.get(id)?.upgrades ?? null)];
   }
 
   /**
@@ -221,6 +271,7 @@ function recordOf(be: NbtCompound, stateKeyAt: StateAt): KnownComputer | null {
     on: be.On === 1,
     pos: [x, y, z],
     facingYawDeg: facingYawDeg(stateKeyAt(x, y, z)),
+    upgrades: kind === 'turtle' ? readTurtleUpgrades(be) : null,
   };
 }
 
@@ -230,7 +281,17 @@ function sameRecord(a: KnownComputer, b: KnownComputer): boolean {
     && a.label === b.label
     && a.on === b.on
     && a.pos[0] === b.pos[0] && a.pos[1] === b.pos[1] && a.pos[2] === b.pos[2]
-    && a.facingYawDeg === b.facingYawDeg;
+    && a.facingYawDeg === b.facingYawDeg
+    && sameUpgrades(a.upgrades, b.upgrades);
+}
+
+function sameUpgrades(a: TurtleUpgrades | null, b: TurtleUpgrades | null): boolean {
+  return upgradeSignature(a) === upgradeSignature(b);
+}
+
+function upgradeSignature(u: TurtleUpgrades | null): string {
+  if (!u) return '';
+  return `${u.left?.id ?? ''}:${u.left?.on ?? ''}|${u.right?.id ?? ''}:${u.right?.on ?? ''}`;
 }
 
 /**

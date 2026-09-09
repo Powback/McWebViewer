@@ -15,7 +15,7 @@ services:
       # Region files to autoload. Each is up to 1024 chunks; two is plenty to fly around.
       # the four regions around the base at -480,63,64: the reach square spans x -560..-401 and
       # z -16..143, crossing the x=-512 and z=0 region seams (2026-09-05: "only plus coords render")
-      MCWV_REGIONS: "r.-1.0.mca,r.-2.0.mca,r.-1.-1.mca,r.-2.-1.mca"
+      MCWV_REGIONS: "${MCWV_REGIONS:-r.0.0.mca}"
       # Uncomment to serve only some mod jars. The full set is ~450 MB and the browser
       # fetches all of it on ?auto=1 — fine on a wired LAN, painful over the VPN.
       # MCWV_JARS: "create-1.21.1-6.0.10.jar,cc-tweaked-1.21.1-forge-1.119.0.jar"
@@ -56,7 +56,7 @@ services:
     init: true
     environment:
       # Must match the viewer's MCWV_REGIONS above: it bakes what the viewer serves.
-      MCWV_REGIONS: "r.-1.0.mca,r.-2.0.mca,r.-1.-1.mca,r.-2.-1.mca"
+      MCWV_REGIONS: "${MCWV_REGIONS:-r.0.0.mca}"
       MCWV_BAKE_MS: "${MCWV_BAKE_MS:-30000}"
     volumes:
       - /Users/macback/Projects/minecraft-create121/data/world:/data/world:ro
@@ -100,6 +100,12 @@ services:
       # Empty MCWV_HQ_URL turns labels off; turtle positions still stream.
       MCWV_HQ_URL: "${MCWV_HQ_URL:-http://hq:4400}"
       MCWV_HQ_MS: "${MCWV_HQ_MS:-1000}"
+      # FALLBACK source for monitor text. The primary source is the computers' own
+      # screen.json files in the world save, served by the viewer container and read by the
+      # page; this feed fills any panel those do not cover. Any URL answering the schema in
+      # bridge/src/monitors.mjs works; empty disables the fallback.
+      MCWV_MONITORS_URL: "${MCWV_MONITORS_URL:-http://hq:4400/monitors}"
+      MCWV_MONITORS_MS: "${MCWV_MONITORS_MS:-2000}"
 
       # --- `save-all flush`: THE ONLY WRITE THIS SERVICE MAKES -------------------
       # Live BLOCK changes (turtles moving, pistons, redstone) need the server to write

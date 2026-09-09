@@ -12,6 +12,7 @@
 
 import {
   bakeModel,
+  DIRECTIONS,
   ModelLoader,
   selectVariants,
   type BakedModel,
@@ -22,6 +23,9 @@ import {
 } from '../assets/model.js';
 import { bakeWithLoader } from '../assets/loaders.js';
 import { berModel, BER_BLOCKS } from './ber-models.js';
+import { backdropModel } from './ber-overlays.js';
+import { INTERIOR_DARK_SPRITE } from '../assets/builtin-pack.js';
+import { bakeTurtleUpgrade, TURTLE_UPGRADE_STATE } from './turtle-upgrades.js';
 import { blockstatePath, readJson, texturePath, type Pack } from '../assets/pack.js';
 import { canonicalStateKey } from '../core/chunk.js';
 import { classifyAlpha, type AlphaClass } from '../assets/png.js';
@@ -120,8 +124,17 @@ export class BlockRegistry {
 
   private alphaCache = new Map<string, AlphaClass>();
 
-  constructor(private pack: Pack) {
+  /**
+   * Block names the WORLD has block entities for — read from the region files by whoever
+   * builds the registry (the bake's scan, or the browser's loaded chunks). It is what tells
+   * a painted-surface block from a merely cutout one (ber-overlays.ts); the jars alone do
+   * not say which blocks have a renderer.
+   */
+  private blockEntityBlocks: ReadonlySet<string>;
+
+  constructor(private pack: Pack, opts: { blockEntityBlocks?: Iterable<string> } = {}) {
     this.models = new ModelLoader(pack);
+    this.blockEntityBlocks = new Set(opts.blockEntityBlocks ?? []);
   }
 
   /** Alpha class of a sprite, read from the PNG itself and memoised. */
@@ -204,6 +217,10 @@ export class BlockRegistry {
       };
     }
 
+    // Not a block at all: the synthetic state a turtle's upgrade is drawn from. It has no
+    // blockstate JSON; its geometry comes from the upgrade definition + the mod's models.
+    if (name === TURTLE_UPGRADE_STATE) return this.buildTurtleUpgrade(base, props);
+
     const bs = this.blockstate(name);
     if (!bs) {
       return {
@@ -215,6 +232,7 @@ export class BlockRegistry {
     const variants = selectVariants(bs, props);
     const b = this.bakeVariants(variants);
     const fromBer = this.addBlockEntityGeometry(name, props, b);
+    this.addPaintedSurfaces(name, variants, b);
 
     return {
       ...base,
@@ -224,6 +242,30 @@ export class BlockRegistry {
       ambientOcclusion: b.ao,
       provenance: fromBer ? 'extracted' : resolveProvenance(b.quads.length, b.sawElements),
       usedCustomLoader: b.usedCustomLoader,
+    };
+  }
+
+  private buildTurtleUpgrade(
+    base: Omit<RenderableState, 'quads' | 'renderType' | 'opaqueFullCube' | 'ambientOcclusion' | 'provenance'>,
+    props: Record<string, string>,
+  ): RenderableState {
+    const baked = bakeTurtleUpgrade(this.pack, this.models, props);
+    if (!baked) {
+      return {
+        ...base, quads: [], renderType: 'cutout', opaqueFullCube: false,
+        ambientOcclusion: false, provenance: 'none',
+      };
+    }
+    let worst: AlphaClass = 'opaque';
+    for (const q of baked.quads) worst = worseAlpha(worst, this.alphaOf(q.texture));
+    return {
+      ...base,
+      quads: baked.quads,
+      renderType: renderTypeFromAlpha(worst),
+      opaqueFullCube: false,
+      // Upgrades hang off the body; vanilla's entity-style renderer does not AO them.
+      ambientOcclusion: false,
+      provenance: 'extracted',
     };
   }
 
@@ -253,6 +295,26 @@ export class BlockRegistry {
     b.ao = baked.ambientOcclusion;
     b.fullCube = false;
     return true;
+  }
+
+  /**
+   * The complement of addBlockEntityGeometry: a full-cube block the world has a block
+   * entity for, with a see-through face — the renderer paints that face (a monitor's
+   * screen). Each such face gets a dark backdrop 1/16 behind it, baked with the SAME variant
+   * rotation as the block's model so it lands where the face does, and counts as opaque for
+   * occlusion: the surface now is. See ber-overlays.ts for the rule and why it is structural.
+   */
+  private addPaintedSurfaces(name: string, variants: Variant[], b: VariantBake): void {
+    if (!b.fullCube || b.cubeTextures.length !== DIRECTIONS.length) return;
+    if (!this.blockEntityBlocks.has(name)) return;
+    const covered = b.cubeTextures.map((t) => this.alphaOf(t) === 'binary');
+    if (!covered.some(Boolean)) return;
+    for (const v of variants) {
+      for (let i = 0; i < DIRECTIONS.length; i++) {
+        if (covered[i]) b.quads.push(...bakeModel(backdropModel(DIRECTIONS[i]), v).quads);
+      }
+    }
+    b.cubeTextures = b.cubeTextures.map((t, i) => (covered[i] ? INTERIOR_DARK_SPRITE : t));
   }
 
   /**

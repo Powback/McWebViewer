@@ -263,12 +263,53 @@ function emitParts(
 
 function emitCubes(part: EntityPart, mat: Mat, ctx: EmitContext, out: BakedQuad[]): void {
   if (!part.cubes.length) return;
-  // Cubes of one part share a transform, so they bake as one throwaway model. bakeModel
-  // divides from/to by 16, which lands them in block units ready for `mat`.
-  const elements = part.cubes.map((c) => cubeElement(c, ctx));
-  for (const q of bakeModel({ elements }, { model: '' }).quads) {
-    out.push(transformQuad(q, mat));
+  // Each cube bakes as its own throwaway model so its centre is known: the winding of every
+  // face is fixed against it BEFORE the part transform, which is a proper rotation and so
+  // preserves it. bakeModel divides from/to by 16, landing the cube in block units for `mat`.
+  for (const c of part.cubes) {
+    const el = cubeElement(c, ctx);
+    const centre: [number, number, number] = [
+      (el.from[0] + el.to[0]) / 32, (el.from[1] + el.to[1]) / 32, (el.from[2] + el.to[2]) / 32,
+    ];
+    for (const q of bakeModel({ elements: [el] }, { model: '' }).quads) {
+      out.push(transformQuad(orientOutward(q, centre), mat));
+    }
   }
+}
+
+/**
+ * Make triangle (0,1,2) of the quad wind counter-clockwise as seen from outside its cube,
+ * and its normal point that way too.
+ *
+ * Vanilla's corner order is not uniform across faces (see mesher.ts), and the mesh builder
+ * below uses a fixed index order — so without this, whichever faces happened to be wound
+ * the other way were back-face culled: the wolf had no back, the cow's head no top. The
+ * outward direction is the face centre relative to the CUBE centre, which cannot disagree
+ * with the geometry it is compared against, however the box was mirrored or inflated.
+ */
+export function orientOutward(q: BakedQuad, cubeCentre: readonly [number, number, number]): BakedQuad {
+  const p = q.positions;
+  let cx = 0, cy = 0, cz = 0;
+  for (let i = 0; i < 4; i++) { cx += p[i * 3]; cy += p[i * 3 + 1]; cz += p[i * 3 + 2]; }
+  const outward: [number, number, number] = [cx / 4 - cubeCentre[0], cy / 4 - cubeCentre[1], cz / 4 - cubeCentre[2]];
+  const ax = p[3] - p[0], ay = p[4] - p[1], az = p[5] - p[2];
+  const bx = p[6] - p[0], by = p[7] - p[1], bz = p[8] - p[2];
+  let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+  let positions = p;
+  let uvs = q.uvs;
+  if (nx * outward[0] + ny * outward[1] + nz * outward[2] < 0) {
+    // Reverse the corner order (0,3,2,1): same quad, opposite winding, uvs travel with corners.
+    positions = new Float32Array(12);
+    uvs = new Float32Array(8);
+    for (let i = 0; i < 4; i++) {
+      const j = (4 - i) & 3;
+      positions.set(p.subarray(j * 3, j * 3 + 3), i * 3);
+      uvs.set(q.uvs.subarray(j * 2, j * 2 + 2), i * 2);
+    }
+    nx = -nx; ny = -ny; nz = -nz;
+  }
+  const len = Math.hypot(nx, ny, nz) || 1;
+  return { ...q, positions, uvs, normal: [nx / len, ny / len, nz / len] };
 }
 
 function cubeElement(c: EntityCube, ctx: EmitContext): RawElement {

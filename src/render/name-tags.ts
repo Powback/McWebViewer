@@ -85,6 +85,12 @@ export class NameTags {
     private makeCanvas: () => HTMLCanvasElement = () => document.createElement('canvas'),
     /** How far above `pos` the label floats: a player is 1.8 blocks tall, a turtle is one. */
     private lift: number = TAG_LIFT,
+    /**
+     * The colour of the bar under the text. Players get a stable per-name colour (identity:
+     * the same player is the same colour every session); turtles pass a STATE colour, so the
+     * bar means the same thing the word next to the name says.
+     */
+    private colorFor: (text: string) => string = nameColor,
   ) {}
 
   /**
@@ -121,7 +127,7 @@ export class NameTags {
 
   private create(name: string): Tag {
     const canvas = this.makeCanvas();
-    const aspect = drawTag(canvas, name);
+    const aspect = drawTag(canvas, name, this.colorFor(name));
     const texture = new THREE.CanvasTexture(canvas);
     // Stated explicitly because the block atlas sets the OPPOSITE (viewer.ts) and the
     // difference is not obvious: the atlas derives its own UVs in canvas coordinates and so
@@ -171,7 +177,7 @@ export class NameTags {
  * to survive being scaled down to a few pixels tall, and at that size an offset shadow
  * turns into a smear on one side while a stroke stays a halo.
  */
-function drawTag(canvas: HTMLCanvasElement, name: string): number {
+function drawTag(canvas: HTMLCanvasElement, name: string, barColor: string): number {
   const ctx = canvas.getContext('2d');
   // No 2D context is a real failure, not a reason to draw a blank label that looks like a
   // player with no name. Let it bubble: live-view has somewhere to report it.
@@ -189,9 +195,9 @@ function drawTag(canvas: HTMLCanvasElement, name: string): number {
   ctx.beginPath();
   ctx.roundRect(0, 0, w, CANVAS_H - 8, 10);
   ctx.fill();
-  // The per-player colour, as a bar under the name: a coloured NAME would fight the stale
-  // tint, which needs white text to multiply against.
-  ctx.fillStyle = nameColor(name);
+  // The bar under the name carries the colour (identity for players, state for turtles): a
+  // coloured NAME would fight the stale tint, which needs white text to multiply against.
+  ctx.fillStyle = barColor;
   ctx.fillRect(PAD_PX, CANVAS_H - 8, w - PAD_PX * 2, 6);
   ctx.lineWidth = 6;
   ctx.strokeStyle = '#000';

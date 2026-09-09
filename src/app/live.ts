@@ -40,6 +40,22 @@ export interface FlushState {
 }
 
 /** One loaded computer from `computercraft dump`: its id, whether it is on, and its block. */
+/** One monitor panel's screen, as the bridge's feed describes it (validated there). */
+export interface LiveMonitor {
+  /** top-left block of the panel, as seen facing the screen */
+  x: number;
+  y: number;
+  z: number;
+  facing: 'north' | 'south' | 'east' | 'west';
+  width: number;
+  height: number;
+  label: string | null;
+  lines: string[];
+  bg: string;
+  fg: string;
+  updated: number;
+}
+
 export interface LiveComputer {
   id: number;
   on: boolean;
@@ -95,6 +111,8 @@ export interface ObserverHooks {
   onPlayers: (players: LivePlayer[]) => void;
   /** every loaded computer's block position, each turtle poll (~1 Hz) */
   onComputers?: (computers: LiveComputer[]) => void;
+  /** what is written on the monitors, from the bridge's monitor feed (see monitor-screens.ts) */
+  onMonitors?: (monitors: LiveMonitor[]) => void;
   /** the server flushed; the save files are worth re-reading */
   onReload: (info: { seq: number; tookMs: number; intervalMs: number }) => void;
   /** the bridge has said whether this browser may drive a player */
@@ -275,6 +293,10 @@ export class ObserverClient {
       from: typeof m.from === 'string' ? m.from : null,
       text: String(m.text ?? ''),
     }),
+    monitors: (m) => {
+      const list = Array.isArray(m.list) ? (m.list as LiveMonitor[]) : [];
+      this.hooks.onMonitors?.(list);
+    },
     turtles: (m) => {
       const { computers, rejected } = readComputers(m.list);
       if (rejected) {

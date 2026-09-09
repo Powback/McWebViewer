@@ -13,14 +13,13 @@ import type { ChunkColumn } from '../render/world.js';
 import type { NbtCompound } from '../core/nbt.js';
 import {
   ComputerRegistry, blockIndexOf, changedSections, classifyBlockEntity, facingYawDeg,
-  headingYawDeg, sectionKeyOf, turtleIdOf, turtleKey, turtleTagText,
-} from './computer-registry.js';
+  headingYawDeg, sectionKeyOf, turtleIdOf, turtleKey, turtleTagText, turtleActivity, turtleStateColor, TURTLE_COLORS } from './computer-registry.js';
 
 /** A column holding just the given block entities; nothing else is read. */
-function column(bes: NbtCompound[]): ChunkColumn {
+function column(bes: NbtCompound[], x = 0, z = 0): ChunkColumn {
   const blockEntities = new Map<number, NbtCompound>();
   bes.forEach((be, i) => blockEntities.set(i, be));
-  return { x: 0, z: 0, minSection: -4, sections: new Map(), blockEntities, status: 'full' };
+  return { x, z, minSection: -4, sections: new Map(), blockEntities, status: 'full' };
 }
 
 /** Shaped like the reference server's turtle block entity, trimmed. */
@@ -50,7 +49,7 @@ test('absorbing a column yields kind, label, saved block and facing, by id', () 
   assert.deepEqual(r.absorb(column([D37, HQ, MODEM]), stateAt), [57, 62]);
   assert.deepEqual(r.get(57), {
     id: 57, kind: 'turtle', blockId: 'computercraft:turtle_normal', label: 'D37', on: true,
-    pos: [-466, 62, 30], facingYawDeg: 180,
+    pos: [-466, 62, 30], facingYawDeg: 180, upgrades: null,
   });
   assert.equal(r.kindOf(62), 'computer');
   assert.equal(r.kindOf(999), 'unknown');
@@ -130,4 +129,31 @@ test('changedSections names every section whose hidden set differs, and nothing 
   assert.deepEqual(changedSections(a, b), ['1,0,0', '2,0,0']);
   assert.deepEqual(changedSections(a, a), []);
   assert.deepEqual(changedSections(new Map(), new Map()), []);
+});
+
+test('a turtle tag always carries a state word: HQ line, else idle when on, off when off', () => {
+  assert.equal(turtleActivity('dig 63,65,31', true), 'dig 63,65,31');
+  assert.equal(turtleActivity('  ', true), 'idle');
+  assert.equal(turtleActivity(null, true), 'idle');
+  assert.equal(turtleActivity(undefined, false), 'off');
+});
+
+test('the bar colour under a turtle tag is its state, not its identity', () => {
+  assert.equal(turtleStateColor('D1 · dig 63,65,31'), TURTLE_COLORS.working);
+  assert.equal(turtleStateColor('D2 · idle'), TURTLE_COLORS.idle);
+  assert.equal(turtleStateColor('#7 · off'), TURTLE_COLORS.off);
+  assert.equal(turtleStateColor('D2 · offline'), TURTLE_COLORS.off, "HQ's own word for a dark drone");
+});
+
+test('a computer whose block entity has left its re-read column is forgotten and reported', () => {
+  const r = new ComputerRegistry();
+  const [cx, cz] = [-466 >> 4, 30 >> 4]; // D37's own column
+  r.absorb(column([D37], cx, cz), stateAt);
+  assert.ok(r.get(57));
+  // some OTHER column re-read without it says nothing about it
+  assert.deepEqual(r.absorb(column([], 0, 0), stateAt), []);
+  assert.ok(r.get(57));
+  // its own column re-read without it: setblock air, or the turtle broken
+  assert.deepEqual(r.absorb(column([], cx, cz), stateAt), [57]);
+  assert.equal(r.get(57), undefined);
 });

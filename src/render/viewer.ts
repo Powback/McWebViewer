@@ -13,6 +13,35 @@ import * as THREE from 'three';
 import type { Layer, SectionMesh } from './mesher.js';
 import type { TextureAtlas } from './atlas.js';
 
+/**
+ * How far, in blocks, a meshed section is still drawn. Beyond it sections are hidden and the
+ * fog has closed anyway. Sections are only MESHED within main.ts's MESH_RADIUS (256); this
+ * is a little wider so terrain meshed on the way somewhere does not pop out at the edge.
+ */
+export const RENDER_DISTANCE = 384;
+/** Beyond this the section is disposed outright; re-meshing on return is ~1 ms. */
+export const UNLOAD_DISTANCE = 640;
+/** Half the diagonal of a 16-block section: the margin that keeps a partly-visible one drawn. */
+const SECTION_HALF_DIAGONAL = 13.9;
+
+/** The world-space centre of a section mesh keyed `cx,cy,cz`; null for entity meshes. */
+export function sectionCentre(key: string): [number, number, number] | null {
+  const m = /^(-?\d+),(-?\d+),(-?\d+)$/.exec(key);
+  if (!m) return null;
+  return [Number(m[1]) * 16 + 8, Number(m[2]) * 16 + 8, Number(m[3]) * 16 + 8];
+}
+
+/** Whether any part of a section centred at `c` can lie within `radius` of `eye`. */
+export function sectionWithin(
+  c: readonly [number, number, number],
+  eye: readonly [number, number, number],
+  radius: number,
+): boolean {
+  const dx = c[0] - eye[0], dy = c[1] - eye[1], dz = c[2] - eye[2];
+  const r = radius + SECTION_HALF_DIAGONAL;
+  return dx * dx + dy * dy + dz * dz <= r * r;
+}
+
 export interface ViewerStats {
   sections: number;
   quads: number;
@@ -172,7 +201,9 @@ export class Viewer {
     this.renderer.setClearColor(0x87ceeb);
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, 2000);
     this.camera.position.set(0, 100, 0);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 300, 900);
+    // The fog ends where the sections stop being drawn (RENDER_DISTANCE), so the cap is a
+    // horizon rather than a cliff of missing terrain.
+    this.scene.fog = new THREE.Fog(0x87ceeb, RENDER_DISTANCE * 0.6, RENDER_DISTANCE);
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -351,6 +382,42 @@ export class Viewer {
       m.position.set(pos[0], pos[1], pos[2]);
       if (angleDeg !== undefined) m.rotation.y = (angleDeg * Math.PI) / 180;
     }
+  }
+
+  /**
+   * View-distance culling, per frame. three.js already frustum-culls every section mesh
+   * (`frustumCulled = true`, so anything behind or beside the camera costs nothing), but
+   * a section meshed while the camera was near it stays in the scene after the camera has
+   * flown 800 blocks away; over a long session every draw call ever made is still made.
+   * Sections beyond RENDER_DISTANCE are hidden here — cheap, and reversible the moment
+   * the camera turns back — and `dropSectionsBeyond` frees the ones far enough away that
+   * re-meshing them on return is cheaper than keeping them.
+   */
+  cullByDistance(): { drawn: number; culled: number } {
+    const cam = this.camera.position;
+    let drawn = 0;
+    let culled = 0;
+    for (const [key, meshes] of this.meshes) {
+      const c = sectionCentre(key);
+      if (!c) continue; // an entity/turtle mesh: never distance-culled here
+      const show = sectionWithin(c, [cam.x, cam.y, cam.z], RENDER_DISTANCE);
+      for (const m of meshes) m.visible = show;
+      if (show) drawn++;
+      else culled++;
+    }
+    return { drawn, culled };
+  }
+
+  /** Dispose section meshes further than `radius` from the camera; returns how many went. */
+  dropSectionsBeyond(radius: number): number {
+    const cam = this.camera.position;
+    const gone: string[] = [];
+    for (const key of this.meshes.keys()) {
+      const c = sectionCentre(key);
+      if (c && !sectionWithin(c, [cam.x, cam.y, cam.z], radius)) gone.push(key);
+    }
+    for (const key of gone) this.removeSection(key);
+    return gone.length;
   }
 
   removeSection(key: string) {

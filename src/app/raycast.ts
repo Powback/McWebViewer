@@ -33,6 +33,16 @@ export function voxelCast(
   origin: { x: number; y: number; z: number },
   dir: readonly [number, number, number],
   maxDist = 5,
+  /**
+   * Blocks the ray should pass straight through, however solid they are.
+   *
+   * FOR THE ISOMETRIC CUTAWAY, which removes geometry in the fragment shader and so removes it
+   * from the PICTURE and not from the world. Without this the picker stops on the roof the reveal
+   * just took off, so clicking into the room you can plainly see picks the invisible ceiling above
+   * it: "the isometric click to move doesnt understand when I'm trying to click through the
+   * occlusion window thingy we made" (the user, 2026-09-11). A click has to mean what is on screen.
+   */
+  hidden?: (x: number, y: number, z: number) => boolean,
 ): VoxelHit | null {
   const cell = [Math.floor(origin.x), Math.floor(origin.y), Math.floor(origin.z)];
   const step = dir.map(Math.sign);
@@ -47,7 +57,10 @@ export function voxelCast(
   // A DDA crosses at most three cell boundaries per block travelled, so this bound is
   // reached only by a ray that is exactly axis-aligned and never terminates.
   for (let i = 0; i < maxDist * 4; i++) {
-    if (world.getState(cell[0], cell[1], cell[2]) !== 0) {
+    if (
+      world.getState(cell[0], cell[1], cell[2]) !== 0
+      && !hidden?.(cell[0], cell[1], cell[2])
+    ) {
       return { block: [cell[0], cell[1], cell[2]], face };
     }
     const axis = tMax[0] < tMax[1] && tMax[0] < tMax[2] ? 0 : tMax[1] < tMax[2] ? 1 : 2;

@@ -244,3 +244,42 @@ test('turtles: a server without CC:T is asked exactly once, then left alone', as
   assert.ok(said(messages, 'live turtles unavailable'));
   assert.equal(has(messages, 'turtles').length, 0);
 });
+
+/**
+ * An observer that never connects to anything, with a fake player that records instead of
+ * sending. `control()` needs neither RCON nor a server: it is pure dispatch.
+ */
+function verbHarness() {
+  const lines = [];
+  const obs = new Observer(
+    { host: '127.0.0.1', port: 1, password: 'x', pollMs: 0, turtleMs: 0, hqMs: 0,
+      flushEnabled: false, fakePlayerEnabled: false, log: (m) => lines.push(String(m)) },
+    () => {},
+  );
+  obs.fakePlayer = { active: true, sent: [], goto(m) { this.sent.push(m); } };
+  return { obs, lines };
+}
+
+test('an unknown control verb is reported once, not dropped in silence', async () => {
+  // THE FAILURE THIS PINS. `goto` replaced the stateful per-tick movement command so that
+  // walking speed would stop scaling with the server tick rate. The running bridge was a
+  // container three days older than that change, had no `goto` in its action table, and
+  // dropped every one without a word -- so the symptom was the very bug the fix had solved
+  // and nothing in any log said why (2026-09-11).
+  const { obs, lines } = verbHarness();
+  await obs.control({ t: 'a-verb-from-a-newer-browser' });
+  await obs.control({ t: 'a-verb-from-a-newer-browser' });
+  await obs.control({ t: 'another-one' });
+
+  const said = lines.filter((l) => l.includes('a-verb-from-a-newer-browser'));
+  assert.equal(said.length, 1, 'once per verb: this is 20 Hz traffic, not once per message');
+  assert.match(said[0], /DROPPED/);
+  assert.match(said[0], /mcwv-bridge/, 'and says how to fix it');
+  assert.equal(lines.filter((l) => l.includes('another-one')).length, 1, 'each verb gets its own');
+});
+
+test('a verb the bridge DOES know is not reported as unknown', async () => {
+  const { obs, lines } = verbHarness();
+  await obs.control({ t: 'goto', x: 1, y: 2, z: 3 });
+  assert.equal(lines.filter((l) => l.includes('DROPPED')).length, 0);
+});

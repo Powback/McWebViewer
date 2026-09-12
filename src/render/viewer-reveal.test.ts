@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PerspectiveCamera, Vector3 } from 'three';
-import { revealCoverage, subjectReveal } from './viewer.js';
+import { revealCoverage, subjectReveal , castCutBias, STANDING_BIAS } from './viewer.js';
 
 const W = 800;
 const H = 600;
@@ -50,7 +50,13 @@ function fragment(camera: PerspectiveCamera, p: readonly [number, number, number
   const v = new Vector3(p[0], p[1], p[2]);
   const viewZ = -v.clone().applyMatrix4(camera.matrixWorldInverse).z;
   const ndc = v.project(camera);
-  return { x: (ndc.x * 0.5 + 0.5) * W, y: (ndc.y * 0.5 + 0.5) * H, viewZ };
+  // `world` carries the fragment's own height and what ceiling-map.ts said about its column.
+  // These fixtures predate the ceiling map and describe open columns, so ceilingY is Infinity --
+  // meaning "no ceiling here", which leaves the depth test alone to decide, as it did before.
+  return {
+    x: (ndc.x * 0.5 + 0.5) * W, y: (ndc.y * 0.5 + 0.5) * H, viewZ,
+    world: { y: p[1], ceilingY: Infinity },
+  };
 }
 
 /** A point `blocks` along the ray from the subject towards the camera — a real occluder. */
@@ -74,10 +80,13 @@ test('a block on the line between camera and character is removed', () => {
   const camera = isoCamera(SUBJECT);
   const reveal = subjectReveal(camera, SUBJECT, W, H)!;
 
-  for (const blocks of [2, 5, 10, 20]) {
+  // Distances must clear REVEAL_DEPTH_BIAS: the cut plane sits that far back from the character
+  // towards the camera, so anything nearer to the character than the bias is deliberately left
+  // alone. At the original 0.9 a block 2 away was an occluder; at 4 it is inside the clearance.
+  for (const blocks of [5, 10, 20]) {
     const f = fragment(camera, onSightline(camera, SUBJECT, blocks));
     assert.equal(
-      revealCoverage(reveal, f.x, f.y, f.viewZ), 0,
+      revealCoverage(reveal, f.x, f.y, f.viewZ, f.world), 0,
       `a block ${blocks} away on the sightline must not survive`,
     );
   }
@@ -93,7 +102,7 @@ test('the character itself survives its own reveal', () => {
   for (const blocks of [0, 0.3, 0.5]) {
     const f = fragment(camera, onSightline(camera, SUBJECT, blocks));
     assert.equal(
-      revealCoverage(reveal, f.x, f.y, f.viewZ), 1,
+      revealCoverage(reveal, f.x, f.y, f.viewZ, f.world), 1,
       `the model's own surface at ${blocks} blocks must be drawn`,
     );
   }
@@ -111,7 +120,7 @@ test('a wall beside the character is untouched, however tall it is', () => {
   for (let y = SUBJECT[1]; y <= SUBJECT[1] + 12; y++) {
     const f = fragment(camera, [SUBJECT[0] + 10, y, SUBJECT[2] - 10]);
     assert.equal(
-      revealCoverage(reveal, f.x, f.y, f.viewZ), 1,
+      revealCoverage(reveal, f.x, f.y, f.viewZ, f.world), 1,
       `a wall block at y=${y} that is not on the sightline must stay drawn`,
     );
   }
@@ -124,7 +133,7 @@ test('a ceiling far from the character keeps its roof', () => {
   for (const [dx, dz] of [[20, 0], [-20, 0], [0, 20], [0, -20], [30, 30]]) {
     const f = fragment(camera, [SUBJECT[0] + dx, SUBJECT[1] + 6, SUBJECT[2] + dz]);
     assert.equal(
-      revealCoverage(reveal, f.x, f.y, f.viewZ), 1,
+      revealCoverage(reveal, f.x, f.y, f.viewZ, f.world), 1,
       `a roof 6 blocks up and ${dx},${dz} away is nobody's occluder`,
     );
   }
@@ -139,7 +148,7 @@ test('the floor the character stands on is not punched through', () => {
   for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
     const f = fragment(camera, [SUBJECT[0] + dx, SUBJECT[1] - 0.5, SUBJECT[2] + dz]);
     assert.equal(
-      revealCoverage(reveal, f.x, f.y, f.viewZ), 1,
+      revealCoverage(reveal, f.x, f.y, f.viewZ, f.world), 1,
       `the ground at ${dx},${dz} is behind the character, not in front of it`,
     );
   }
@@ -162,7 +171,7 @@ test('the character changing height does not change distant geometry', () => {
     const reveal = subjectReveal(camera, subject, W, H)!;
     return wall.map((p) => {
       const f = fragment(camera, p);
-      return revealCoverage(reveal, f.x, f.y, f.viewZ);
+      return revealCoverage(reveal, f.x, f.y, f.viewZ, f.world);
     });
   });
 
@@ -192,10 +201,11 @@ test('the fade is gradual, not a hard edge', () => {
   const r = subjectReveal(camera, SUBJECT, W, H)!;
   const behind = r.cutViewZ - 1;
 
-  const mid = revealCoverage(r, r.x + (r.inner + r.outer) / 2, r.y, behind);
+  const open = { y: SUBJECT[1] + 2, ceilingY: Infinity };   // above the feet, no ceiling
+  const mid = revealCoverage(r, r.x + (r.inner + r.outer) / 2, r.y, behind, open);
   assert.ok(mid > 0 && mid < 1, `the ring must be partial, got ${mid}`);
-  assert.equal(revealCoverage(r, r.x + r.outer + 1, r.y, behind), 1);
-  assert.equal(revealCoverage(r, r.x, r.y, behind), 0);
+  assert.equal(revealCoverage(r, r.x + r.outer + 1, r.y, behind, open), 1);
+  assert.equal(revealCoverage(r, r.x, r.y, behind, open), 0);
 });
 
 test('nothing is revealed when the subject is behind the camera', () => {
@@ -206,5 +216,91 @@ test('nothing is revealed when the subject is behind the camera', () => {
   ) + 10);
   assert.equal(subjectReveal(camera, behind, W, H), null);
   // ...and with nothing to reveal, every fragment is drawn.
-  assert.equal(revealCoverage(null, 400, 300, 1), 1);
+  assert.equal(revealCoverage(null, 400, 300, 1, { y: 70, ceilingY: Infinity }), 1);
+});
+
+// ---------------------------------------------------------------------------
+// The cut plane is cast, not guessed.
+
+test('the cast finds the wall, and STANDING_BIAS decides how much of it survives', () => {
+  // THE DIRECTION THAT KEEPS CATCHING PEOPLE OUT: a BIGGER bias cuts LESS. The plane sits at
+  // `subjectViewZ - bias`, and only fragments nearer than the plane are cut, so raising the bias
+  // pulls the plane towards the camera and spares more. A wall closer to the character than
+  // STANDING_BIAS is therefore deliberately NOT cut -- the cut stops short of it.
+  const camera = isoCamera(SUBJECT);
+  const far = STANDING_BIAS + 4;
+  const toCam = camera.position.clone().sub(new Vector3(SUBJECT[0], SUBJECT[1] + 1, SUBJECT[2]));
+  toCam.y = 0; toCam.normalize();
+  const wallX = Math.floor(SUBJECT[0] + toCam.x * far);
+  const wallZ = Math.floor(SUBJECT[2] + toCam.z * far);
+  const isOpen = (x: number, _y: number, z: number) => !(x === wallX && z === wallZ);
+
+  const cast = castCutBias(isOpen, camera, SUBJECT)!;
+  assert.ok(cast, 'the wall is found');
+  assert.ok(cast.wall > 0, 'and its distance measured');
+  // The cast tracks the wall, and the standing bias is a fixed offset IN FRONT of it.
+  assert.ok(Math.abs(cast.bias - (cast.wall - 0.5 + STANDING_BIAS)) < 1e-9,
+    `the bias tracks the measured wall: bias ${cast.bias}, wall ${cast.wall}`);
+
+  // THE CONSEQUENCE, stated so a change to STANDING_BIAS has to face it: while the standing bias
+  // is over 0.5 the plane lands NEARER the camera than the wall the cast found, so that wall is
+  // NOT cut. Only what sits in the gap between the plane and the camera is.
+  const reveal = subjectReveal(camera, SUBJECT, W, H, cast.bias)!;
+  const atWall = fragment(camera, onSightline(camera, SUBJECT, far));
+  const spared = STANDING_BIAS > 0.5;
+  assert.equal(revealCoverage(reveal, atWall.x, atWall.y, atWall.viewZ, atWall.world), spared ? 1 : 0,
+    `with STANDING_BIAS ${STANDING_BIAS} the cast wall is ${spared ? 'SPARED' : 'cut'}`);
+
+  // What IS cut is anything nearer than the plane: STANDING_BIAS - 0.5 blocks in front of the wall.
+  // It has to be ON the sightline -- the plane decides the DEPTH of the cut, the disc still decides
+  // its extent on screen, so a wall far to one side is outside the hole wherever the plane sits.
+  const nearer = fragment(camera, onSightline(camera, SUBJECT, far + STANDING_BIAS));
+  assert.equal(revealCoverage(reveal, nearer.x, nearer.y, nearer.viewZ, nearer.world), 0,
+    'a block between the plane and the camera, on the sightline, goes');
+});
+
+test('nothing in the way means no cast value — the caller keeps its default', () => {
+  // Open ground: inventing a distance here would cut the world for no reason.
+  const camera = isoCamera(SUBJECT);
+  assert.equal(castCutBias(() => true, camera, SUBJECT), null);
+});
+
+test('a wall behind the character does not move the plane', () => {
+  // The ray walks TOWARDS the camera; what is behind you never blocks the view of you.
+  const camera = isoCamera(SUBJECT);
+  const toCam = camera.position.clone().sub(new Vector3(SUBJECT[0], SUBJECT[1] + 1, SUBJECT[2]));
+  toCam.y = 0; toCam.normalize();
+  const behindX = Math.floor(SUBJECT[0] - toCam.x * 4);
+  const behindZ = Math.floor(SUBJECT[2] - toCam.z * 4);
+  const isOpen = (x: number, _y: number, z: number) => !(x === behindX && z === behindZ);
+  assert.equal(castCutBias(isOpen, camera, SUBJECT), null, 'a wall behind is not an occluder');
+});
+
+test('the cast rides a block higher when there is headroom, and stays low when there is not', () => {
+  const camera = isoCamera(SUBJECT);
+  const feetY = Math.floor(SUBJECT[1]);
+  const toCam = camera.position.clone().sub(new Vector3(SUBJECT[0], SUBJECT[1] + 1, SUBJECT[2]));
+  toCam.y = 0; toCam.normalize();
+  // Waist-high furniture 3 blocks along: at eye level it stops the ray, a block higher it does not.
+  const fx = Math.floor(SUBJECT[0] + toCam.x * 3);
+  const fz = Math.floor(SUBJECT[2] + toCam.z * 3);
+  const wx = Math.floor(SUBJECT[0] + toCam.x * 7);
+  const wz = Math.floor(SUBJECT[2] + toCam.z * 7);
+
+  const roomy = (x: number, y: number, z: number) => {
+    if (x === wx && z === wz) return false;                 // the real wall, 7 out
+    if (x === fx && z === fz && y <= feetY + 1) return false; // furniture, only up to eye level
+    return true;                                             // headroom above the character
+  };
+  const low = (x: number, y: number, z: number) => {
+    if (y >= feetY + 2) return false;                        // a lid right above the head
+    return roomy(x, y, z);
+  };
+  // And the ray climbs no further than two above the head, so an ordinary storey's ceiling is safe.
+
+  const withHeadroom = castCutBias(roomy, camera, SUBJECT)!.bias;
+  const withoutHeadroom = castCutBias(low, camera, SUBJECT)!.bias;
+  // With headroom the ray clears the furniture and finds the wall, so the plane sits further out.
+  assert.ok(withHeadroom > withoutHeadroom,
+    `headroom should reach past the furniture: ${withHeadroom} vs ${withoutHeadroom}`);
 });

@@ -77,7 +77,13 @@ mkdir -p "$HERE/out"
   --client "$DEOBF_JAR" --libs "$CACHE/libs" --mods "$MODS" --audit "$AUDIT" --out "$HERE/out" \
   2>&1 | grep 'extract\]'
 
-step "6. glTF (optional)"
+step "6. physics: player constants + every block's collision shape and hardness"
+"$JAVA" -Xmx4g -Dlog4j2.configurationFile="$HERE/log4j2.xml" -cp "$HERE/build:$DEOBF_JAR:$LIBS" mcextract.ExtractPhysics \
+  --out "$HERE/out" 2>&1 | grep 'extract\]'
+# The renderer reads this from public/, the same way it reads the entity models.
+cp "$HERE/out/physics.json" "$HERE/../public/physics.json"
+
+step "7. glTF (optional)"
 "$JAVA" -cp "$HERE/build:$CACHE/libs/asm-9.7.jar" mcextract.EmitGltf \
   "$HERE/out/entity-models.json" "$HERE/out/entity-models.gltf"
 

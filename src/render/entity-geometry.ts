@@ -1,3 +1,4 @@
+import { stillAnim, toSnorm8, toUnorm16, toUnorm8 } from './mesher.js';
 /**
  * Entity geometry from the offline Java-model extraction.
  *
@@ -29,10 +30,13 @@
  */
 
 import { box, type BoxSpec } from './ber-models.js';
+import { classifyPart, type PartRole } from './entity-anim.js';
 import { bakeModel, type BakedQuad, type Direction, type RawElement } from '../assets/model.js';
 import type { TextureAtlas } from './atlas.js';
 import type { Layer, LayerBuffers } from './mesher.js';
 import type { EntityGeometrySource } from './entities.js';
+import { defaultVariantTexture, type EntityAppearance, type EntityLayer } from './entity-layers.js';
+import { entityAppearanceContext } from '../app/entity-tracks.js';
 
 // ---------------------------------------------------------------------------
 // The extracted data, exactly as `harness/out/*.json` writes it.
@@ -155,6 +159,8 @@ export function spriteIdForTexture(path: string): string | null {
  */
 export class EntityModelSet implements EntityGeometrySource {
   private textureAvailable: (spriteId: string) => boolean = () => true;
+  /** stand-in textures for types whose real one is per-variant; see useDefaultTextures */
+  private defaults: (entityType: string) => string | null = () => null;
 
   constructor(
     readonly models: EntityModels,
@@ -163,10 +169,16 @@ export class EntityModelSet implements EntityGeometrySource {
 
   geometryFor(entityType: string): { model: EntityModel; sprite: string } | null {
     const entry = this.index[entityType];
-    if (!entry || !entry.model || !entry.texture) return null;
+    if (!entry || !entry.model) return null;
+    // A type whose renderer picks its texture from a variant registry has none in the index.
+    // Falling back to any of that registry's textures makes it drawable; the per-entity
+    // appearance rule then replaces it with the right coat. Without this a cat is refused
+    // here and never reaches the appearance layer at all.
+    const texture = entry.texture ?? this.defaults(entityType);
+    if (!texture) return null;
     const model = this.models[entry.model];
     if (!model || Object.keys(model.parts).length === 0) return null;
-    const sprite = spriteIdForTexture(entry.texture);
+    const sprite = spriteIdForTexture(texture);
     if (!sprite || !this.textureAvailable(sprite)) return null;
     return { model, sprite };
   }
@@ -183,7 +195,7 @@ export class EntityModelSet implements EntityGeometrySource {
   spriteIds(entityTypes: Iterable<string>): Set<string> {
     const out = new Set<string>();
     for (const t of entityTypes) {
-      const tex = this.index[t]?.texture;
+      const tex = this.index[t]?.texture ?? this.defaults(t);
       const sprite = tex ? spriteIdForTexture(tex) : null;
       if (sprite) out.add(sprite);
     }
@@ -193,6 +205,11 @@ export class EntityModelSet implements EntityGeometrySource {
   /** Install the "can this sprite be drawn?" test once the atlas/pack stack is known. */
   useTextureFilter(fn: (spriteId: string) => boolean): void {
     this.textureAvailable = fn;
+  }
+
+  /** Install the per-variant fallback used when the index has no texture for a type. */
+  useDefaultTextures(fn: (entityType: string) => string | null): void {
+    this.defaults = fn;
   }
 }
 
@@ -209,7 +226,12 @@ export async function loadEntityModels(base = ''): Promise<EntityModelSet> {
     fetchJson<EntityModels>(`${base}/entity-models.json`),
     fetchJson<EntityIndex>(`${base}/entity-index.json`),
   ]);
-  return new EntityModelSet(models, index);
+  const set = new EntityModelSet(models, index);
+  // Cats and frogs carry no texture in the index because theirs is per-variant; without a
+  // stand-in, `geometryFor` refuses them and they never reach the appearance rule that
+  // would give them the right coat. See entity-layers.defaultVariantTexture.
+  set.useDefaultTextures((type) => defaultVariantTexture(type, entityAppearanceContext()));
+  return set;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -224,6 +246,8 @@ async function fetchJson<T>(url: string): Promise<T> {
 interface EmitContext {
   texSize: [number, number];
   texture: string;
+  /** literal multiply colour for this layer — a sheep's wool, not a biome tint */
+  tint?: readonly [number, number, number];
 }
 
 /**
@@ -232,20 +256,154 @@ interface EmitContext {
  * texture is not in the atlas — in that case drawing it would produce invisible quads,
  * and reporting it as drawn would be a lie.
  */
+/**
+ * A part tree with its cube geometry baked once, ready to be re-posed cheaply.
+ *
+ * `buildEntityQuads` flattens the tree into world-space quads, which is right for a mob
+ * that never moves a limb. Animation needs the tree kept: vanilla's `setupAnim` works by
+ * setting `part.xRot/yRot/zRot`, which are the very rotations `partMatrix` already applies,
+ * so posing is exact rather than approximate — only the ANGLES are guessed (see
+ * entity-anim.ts), never the maths that applies them.
+ */
+export interface PosedPart {
+  name: string;
+  role: PartRole;
+  pos: readonly [number, number, number];
+  rot: readonly [number, number, number];
+  /** cube geometry in this part's OWN space, baked once */
+  local: BakedQuad[];
+  children: PosedPart[];
+}
+
+/** Build the part tree with geometry baked in part-local space. */
+export function buildPosedParts(
+  modelSet: EntityModelSet,
+  entityType: string,
+  atlas: TextureAtlas,
+  appearance?: EntityAppearance,
+): PosedPart[] | null {
+  const geom = modelSet.geometryFor(entityType);
+  if (!geom || !atlas.get(geom.sprite)) return null;
+  const out: PosedPart[] = [];
+  // A secondary layer's parts are MERGED into the part of the same name, not appended as
+  // separate parts: the wool on a sheep's head has to swing with that head, and a walk
+  // cycle addresses parts by name. A layer part with no counterpart on the base model is
+  // added on its own, which is what an armour stand's extra pieces would need.
+  for (const layer of appearance?.layers ?? [BASE_LAYER]) {
+    const model = layer.model ? modelSet.models[layer.model] : geom.model;
+    if (!model || !Object.keys(model.parts).length) continue;
+    const sprite = layer.texture ? spriteIdForTexture(layer.texture) : geom.sprite;
+    if (!sprite || !atlas.get(sprite)) continue;
+    const ctx: EmitContext = {
+      texSize: [model.texWidth, model.texHeight],
+      texture: sprite,
+      tint: layer.tint ?? undefined,
+    };
+    for (const part of posedFrom(model.parts, ctx)) {
+      const existing = out.find((o) => o.name === part.name);
+      if (existing) existing.local.push(...part.local);
+      else out.push(part);
+    }
+  }
+  return out.length ? out : null;
+}
+
+function posedFrom(parts: Record<string, EntityPart>, ctx: EmitContext): PosedPart[] {
+  const out: PosedPart[] = [];
+  for (const [name, part] of Object.entries(parts)) {
+    const local: BakedQuad[] = [];
+    // IDENTITY, not the part matrix: the geometry is kept in the part's own space so the
+    // pose can be recomputed later without re-baking a single cube.
+    emitCubes(part, IDENTITY, ctx, local);
+    out.push({
+      name,
+      role: classifyPart(name),
+      pos: part.pos,
+      rot: part.rot,
+      local,
+      children: part.children ? posedFrom(part.children, ctx) : [],
+    });
+  }
+  return out;
+}
+
+/**
+ * Flatten a posed tree to world-space quads, adding each part's animation rotation.
+ *
+ * The extra rotation is added to the part's own `rot` BEFORE `partMatrix` runs, which is
+ * exactly where vanilla puts it — so a rotated part carries its children with it and pivots
+ * about its own origin, with no special-casing.
+ */
+export function poseQuads(
+  parts: readonly PosedPart[],
+  rotFor: (part: PosedPart) => { x: number; y: number; z: number },
+): BakedQuad[] {
+  const out: BakedQuad[] = [];
+  posePart(parts, ROOT, rotFor, out);
+  return out;
+}
+
+function posePart(
+  parts: readonly PosedPart[],
+  parent: Mat,
+  rotFor: (part: PosedPart) => { x: number; y: number; z: number },
+  out: BakedQuad[],
+): void {
+  for (const part of parts) {
+    const extra = rotFor(part);
+    const mat = partMatrix(parent, {
+      pos: part.pos,
+      rot: [part.rot[0] + extra.x, part.rot[1] + extra.y, part.rot[2] + extra.z],
+      cubes: [],
+    } as unknown as EntityPart);
+    for (const q of part.local) out.push(transformQuad(q, mat));
+    if (part.children.length) posePart(part.children, mat, rotFor, out);
+  }
+}
+
 export function buildEntityQuads(
   modelSet: EntityModelSet,
   entityType: string,
   atlas: TextureAtlas,
+  appearance?: EntityAppearance,
 ): BakedQuad[] | null {
   const geom = modelSet.geometryFor(entityType);
   if (!geom || !atlas.get(geom.sprite)) return null;
-  const ctx: EmitContext = {
-    texSize: [geom.model.texWidth, geom.model.texHeight],
-    texture: geom.sprite,
-  };
   const quads: BakedQuad[] = [];
-  emitParts(geom.model.parts, ROOT, ctx, quads);
+  for (const layer of appearance?.layers ?? [BASE_LAYER]) {
+    emitLayer(modelSet, geom, layer, atlas, quads);
+  }
   return quads.length ? quads : null;
+}
+
+const BASE_LAYER: EntityLayer = { model: null, texture: null, tint: null };
+
+/**
+ * One layer of a mob: its own model and texture where it names them, the base entry's where
+ * it does not.
+ *
+ * A layer that names a texture the atlas does not hold is SKIPPED rather than drawn — an
+ * unbaked sprite samples whatever happens to sit at (0,0) in the atlas, which is a worse
+ * failure than the missing layer it replaces. The base layer is exempt from nothing: if the
+ * whole mob's texture is absent, `geometryFor` has already returned null.
+ */
+function emitLayer(
+  modelSet: EntityModelSet,
+  geom: { model: EntityModel; sprite: string },
+  layer: EntityLayer,
+  atlas: TextureAtlas,
+  out: BakedQuad[],
+): void {
+  const model = layer.model ? modelSet.models[layer.model] : geom.model;
+  if (!model || !Object.keys(model.parts).length) return;
+  const sprite = layer.texture ? spriteIdForTexture(layer.texture) : geom.sprite;
+  if (!sprite || !atlas.get(sprite)) return;
+  const ctx: EmitContext = {
+    texSize: [model.texWidth, model.texHeight],
+    texture: sprite,
+    tint: layer.tint ?? undefined,
+  };
+  emitParts(model.parts, ROOT, ctx, out);
 }
 
 function emitParts(
@@ -272,7 +430,8 @@ function emitCubes(part: EntityPart, mat: Mat, ctx: EmitContext, out: BakedQuad[
       (el.from[0] + el.to[0]) / 32, (el.from[1] + el.to[1]) / 32, (el.from[2] + el.to[2]) / 32,
     ];
     for (const q of bakeModel({ elements: [el] }, { model: '' }).quads) {
-      out.push(transformQuad(orientOutward(q, centre), mat));
+      const t = transformQuad(orientOutward(q, centre), mat);
+      out.push(ctx.tint ? { ...t, tint: ctx.tint } : t);
     }
   }
 }
@@ -399,6 +558,8 @@ export interface EntityMesh {
  * with the terrain around them. `facing` is recomputed from the transformed normal, so a
  * part rotated off-axis still gets the shade of the direction it ends up facing.
  */
+const WHITE: readonly [number, number, number] = [1, 1, 1];
+
 const SHADE: Record<Direction, number> = {
   down: 0.5, up: 1.0, north: 0.8, south: 0.8, west: 0.6, east: 0.6,
 };
@@ -422,11 +583,14 @@ export function meshEntityQuads(quads: BakedQuad[], atlas: TextureAtlas): Entity
     const su = sprite.u1 - sprite.u0;
     const sv = sprite.v1 - sprite.v0;
     const v = SHADE[q.facing];
+    // A layer tint multiplies the shade rather than replacing it, so a black sheep's wool
+    // still reads as a shape and not as a silhouette.
+    const [tr, tg, tb] = q.tint ?? WHITE;
     for (let i = 0; i < 4; i++) {
       pos.push(q.positions[i * 3], q.positions[i * 3 + 1], q.positions[i * 3 + 2]);
       nor.push(q.normal[0], q.normal[1], q.normal[2]);
       uv.push(sprite.u0 + q.uvs[i * 2] * su, sprite.v0 + q.uvs[i * 2 + 1] * sv);
-      col.push(v, v, v, 1);
+      col.push(v * tr, v * tg, v * tb, 1);
     }
     idx.push(n, n + 1, n + 2, n + 2, n + 3, n);
     n += 4;
@@ -437,10 +601,14 @@ export function meshEntityQuads(quads: BakedQuad[], atlas: TextureAtlas): Entity
     layers: {
       cutout: {
         positions: new Float32Array(pos),
-        normals: new Float32Array(nor),
-        uvs: new Float32Array(uv),
-        colors: new Float32Array(col),
+        // Narrowed as section geometry is; mobs and players are a few hundred quads each but
+        // there are hundreds of them. See the note on toSnorm8 in mesher.ts.
+        normals: toSnorm8(nor),
+        uvs: toUnorm16(uv),
+        colors: toUnorm8(col),
         indices: new Uint32Array(idx),
+        // Entity models have no animated textures; see stillAnim.
+        anim: stillAnim(pos.length / 3),
       },
     },
     quadCount: idx.length / 6,

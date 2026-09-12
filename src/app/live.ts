@@ -51,8 +51,42 @@ export interface LiveMonitor {
   height: number;
   label: string | null;
   lines: string[];
+  /** whole-screen colours; the fallback when a source carries no per-cell grid */
   bg: string;
   fg: string;
+  /**
+   * Per-CELL palette digits, one hex character per cell, in the same shape as `lines`.
+   *
+   * Optional because the two sources differ in kind, not in degree: a computer's
+   * `screen.json` — the bridge's only monitor data — contains `lines` and nothing else, so
+   * the bridge path has never had per-cell colour and cannot acquire it. SpacetimeDB mirrors
+   * the terminal itself and carries both grids. Flattening them to one `fg`/`bg` would make
+   * the spacetime monitor path exactly equal to the bridge path, which is to say pointless:
+   * the grid IS the delta between the sources.
+   */
+  fgCells?: readonly string[];
+  bgCells?: readonly string[];
+  /**
+   * 16 `#rrggbb` entries indexed by the digits above.
+   *
+   * ALREADY UN-REVERSED. CC stores palette entries in `Colour.values()` order while a cell's
+   * digit is the Lua index, and the mod renders `palette[15 - digit]`; the proxy undoes that,
+   * so `palette[parseInt(digit, 16)]` is simply correct. Reversing again gives a
+   * plausible-looking black-on-white from a screen that is really white-on-black — wrong in
+   * a way that looks deliberate.
+   */
+  palette?: readonly string[];
+  /**
+   * The terminal's real size in characters, when the source knows it.
+   *
+   * The bridge cannot: `screen.json` has no size, so the painter derives a grid from the
+   * panel's block dimensions and a fixed characters-per-block. That is right for the default
+   * text scale and wrong for any other — this world's 3x4 panels run a 57x52 terminal, where
+   * the derived grid gives far fewer rows and a log tail lands squashed at the bottom of an
+   * otherwise empty wall. The protocol reports it exactly, so when it is known it wins.
+   */
+  cols?: number;
+  rows?: number;
   updated: number;
 }
 

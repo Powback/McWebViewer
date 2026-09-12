@@ -222,12 +222,17 @@ const PAGE_SCRIPT = String.raw`
   }
   const round = (p) => p.map((n) => Math.round(n * 100) / 100);
 
-  // ---- the planner, through the real tap path where possible ---------------
+  // ---- the planner, through the real entry point ---------------------------
+  //
+  // walkToCell rather than assigning iso.goal, which is what this used to do. Setting the
+  // private field skips the bookkeeping a walk starts with — including the clock the
+  // whole-walk deadline is measured against, which on a page that has been open for a
+  // couple of minutes makes every walk instantly "stuck". A proof harness that reaches
+  // past the public entry point is a harness that can prove something the app cannot do.
   function planned(dest) {
     return () => {
       iso.stop();
-      iso.goal = [dest[0], dest[1], dest[2]];
-      iso.walkStatus = 'planning';
+      iso.walkToCell([dest[0], dest[1], dest[2]]);
       return () => ['arrived', 'no path', 'stuck', 'idle'].includes(iso.walkStatus);
     };
   }
@@ -236,6 +241,13 @@ const PAGE_SCRIPT = String.raw`
    * The OLD implementation, reproduced verbatim from the commit it was removed in:
    * face the destination, hold forward, jump every 600 ms while no progress is being
    * made, and abandon the walk after four seconds of that.
+   *
+   * WHAT THIS ARM NOW MEASURES IS DIFFERENT FROM WHAT IT USED TO. Movement stopped being
+   * command-driven: FakePlayer.input() issues no move command any more, because the body is
+   * placed by tp from the browser's local simulation instead (which is what made walking
+   * speed independent of a 145 tps server). So these input frames move nothing at all, and
+   * this arm records a character that does not budge. That is not a broken harness — it is
+   * exactly the failure this change fixed, and it is worth seeing measured.
    */
   function steered(dest) {
     return () => {

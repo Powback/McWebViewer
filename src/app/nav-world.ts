@@ -38,6 +38,14 @@ const PASSABLE_EXACT = new Set([
   'minecraft:weeping_vines', 'minecraft:weeping_vines_plant', 'minecraft:pink_petals',
   'minecraft:end_rod', 'minecraft:lightning_rod', 'minecraft:comparator',
   'minecraft:repeater', 'minecraft:rail', 'minecraft:string',
+  // Vanilla plants whose names match none of the shapes below, so nothing else catches
+  // them. They were all being walked AROUND — see the note on `isBareName`; these are the
+  // ones that rule does not reach either, because their names are not a suffix of anything.
+  'minecraft:allium', 'minecraft:cornflower', 'minecraft:lily_of_the_valley',
+  'minecraft:sunflower', 'minecraft:lilac', 'minecraft:peony', 'minecraft:pitcher_plant',
+  'minecraft:melon_stem', 'minecraft:pumpkin_stem', 'minecraft:attached_melon_stem',
+  'minecraft:attached_pumpkin_stem', 'minecraft:cave_vines', 'minecraft:cave_vines_plant',
+  'minecraft:spore_blossom', 'minecraft:torchflower_crop', 'minecraft:pitcher_crop',
 ]);
 
 const PASSABLE_SUFFIX = [
@@ -45,6 +53,16 @@ const PASSABLE_SUFFIX = [
   '_pressure_plate', '_carpet', '_fern', '_grass', '_bush', '_roots', '_sprouts',
   '_mushroom', '_lichen', '_coral', '_coral_fan', '_coral_wall_fan', '_plate',
   '_tulip', '_orchid', '_bluet', '_daisy', '_lily', '_poppy', '_dandelion',
+  // MEASURED AGAINST THIS WORLD, not guessed at. A parity audit of modded collision found
+  // 137 cells of Farmer's Delight crop — rice, rice panicles, wild onions, wild beetroots,
+  // a sandy shrub — falling through to "unlisted, therefore solid" and standing in the
+  // world as walls. A rice paddy you cannot walk across looks exactly like a pathfinding
+  // bug and is not one; these have no collision box in the game at all, so the server and
+  // the planner only agree once they are listed here.
+  //
+  // Suffixes rather than the five exact names, because the name SHAPE is what other mods
+  // copy — the same reason the vanilla entries above are suffixes.
+  '_panicles', '_onions', '_beetroots', '_shrub', '_rice',
 ];
 
 /**
@@ -66,15 +84,68 @@ const AVOID_EXACT = new Set([
 ]);
 
 /** The state name without its properties: `minecraft:oak_stairs[facing=north]` -> the name. */
-function nameOf(stateKey: string): string {
+export function nameOf(stateKey: string): string {
   const bracket = stateKey.indexOf('[');
   return bracket < 0 ? stateKey : stateKey.slice(0, bracket);
 }
 
-function classifyName(name: string): NavClass {
+/**
+ * Modded blocks that carry no collision and whose name does not end in a shape this knows.
+ *
+ * A short list on purpose. Everything here was seen in the live world and checked against
+ * what the game actually does, because the cost of being wrong is not symmetric: a plant
+ * wrongly called solid is a silly detour, and a wall wrongly called air is a route the
+ * character walks into and gives up on.
+ */
+const MODDED_PASSABLE = new Set([
+  'farmersdelight:rice', 'farmersdelight:rice_panicles',
+  'farmersdelight:wild_onions', 'farmersdelight:wild_beetroots',
+  'farmersdelight:sandy_shrub',
+]);
+
+/**
+ * WHAT IS DELIBERATELY NOT HERE: `computercraft:cable`, all 577 cells of it.
+ *
+ * A cable's real collision is a thin cross, and this table has no way to say that — the
+ * three classes are "a body may occupy it", "it may stand on it" and "avoid it", and a
+ * cable is none of those cleanly. Unlisted it resolves to a full cube, which makes the
+ * planner walk AROUND a cable. That is the wrong answer and it is the SAFE wrong answer:
+ * the route is a little longer and the character still arrives. Listed as passable it would
+ * be a route planned straight through a cable the SERVER still collides with, and the walk
+ * would end in "stuck" against geometry the browser insists is not there — which is the
+ * exact failure this whole file's "unknown means solid, always" rule exists to prevent.
+ *
+ * The real fix is a collision box, not a class: extract modded shapes the way
+ * `harness/src/mcextract/ExtractPhysics.java` extracts vanilla ones, and let
+ * block-shapes.ts serve them at tier 1. Until then this stays a detour rather than a trap.
+ */
+
+/**
+ * Is this the WHOLE block name, after the namespace, rather than the tail of a longer one?
+ *
+ * `minecraft:dandelion` was a WALL. The suffix list carries `_dandelion`, `_fern`,
+ * `_poppy` and so on because that is the shape modded names copy — but a suffix beginning
+ * with an underscore cannot match a block simply called `dandelion`, and vanilla names a
+ * good few of its plants with no prefix at all. So the character walked around dandelions,
+ * ferns and poppies, and the table said it was working. Found by the first test ever
+ * written against `classifyName`, which is the argument for having written it.
+ *
+ * So a suffix `_x` also matches a block whose name is exactly `x` in any namespace. That is
+ * the same claim the suffix already makes — "a block called this is a plant" — with the
+ * separator made optional rather than required.
+ */
+function isBareName(name: string, suffix: string): boolean {
+  const colon = name.lastIndexOf(':');
+  return name.slice(colon + 1) === suffix.slice(1);
+}
+
+export function classifyName(name: string): NavClass {
+  if (MODDED_PASSABLE.has(name)) return 'air';
   if (AVOID_EXACT.has(name)) return 'avoid';
   if (PASSABLE_EXACT.has(name)) return 'air';
-  for (const suffix of PASSABLE_SUFFIX) if (name.endsWith(suffix)) return 'air';
+  for (const suffix of PASSABLE_SUFFIX) {
+    if (name.endsWith(suffix) || isBareName(name, suffix)) return 'air';
+  }
   return 'solid';
 }
 

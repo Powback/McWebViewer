@@ -16,6 +16,11 @@ import { TextureAtlas } from './atlas.js';
 import type { RenderableState } from './registry.js';
 import type { StateSource, TintLookup } from './mesher.js';
 import { deserialiseState, type BakedAssets } from '../server/asset-format.js';
+import { useEntityVariants } from '../app/entity-tracks.js';
+import { setRegistrySizes } from '../core/chunk.js';
+import { setEntitySizes } from './entity-sizes.js';
+import { useVariantRegistries } from '../app/spacetime-entities.js';
+import type { VariantTable } from './entity-metadata.js';
 
 type RGB = readonly [number, number, number];
 
@@ -57,6 +62,18 @@ class ServedStates implements StateSource {
 
   get size(): number {
     return Object.keys(this.bundle.states).length;
+  }
+
+  /**
+   * Every canonical state key the bundle can render.
+   *
+   * Used by the spacetime terrain path to work out each block property's DOMAIN, which is
+   * how it recovers the properties the wire omits because they are at their default value.
+   * See spacetime-sections.ts — the bundle turns out to be a better domain source than the
+   * blockstate JSON would be, because it is already canonical and already per-state.
+   */
+  keys(): Iterable<string> {
+    return Object.keys(this.bundle.states);
   }
 }
 
@@ -159,6 +176,20 @@ export async function loadServedAssets(
     const r = await fetch(`${base}/assets.json`, init).catch(() => null);
     if (!r?.ok) continue;
     const bundle = (await r.json()) as BakedAssets;
+    // Datapack variant tables travel in the bundle because the browser has no packs; see
+    // the field's note in asset-format.ts for why a wolf's coat cannot be derived from its
+    // variant name. Installed here, at the one place a bundle becomes live.
+    useEntityVariants(bundle.entityVariants);
+    // How wide a promoted paletted container is written. Nowhere in a save file, so it
+    // travels in the bundle; see core/chunk.ts for what goes wrong without it.
+    if (bundle.registrySizes) setRegistrySizes(bundle.registrySizes);
+    // Collision boxes, for the spawner cage's scale rule. See render/spawner-display.ts.
+    setEntitySizes(bundle.entitySizes);
+    // The same variant tables the appearance rules use, for turning a metadata int back into
+    // a registry name. One table, two readers — see render/entity-metadata.ts.
+    useVariantRegistries(bundle.entityVariants
+      ? (name) => bundle.entityVariants?.[name] as VariantTable | undefined
+      : undefined);
     const registry = new ServedStates(bundle);
     return {
       registry,

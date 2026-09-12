@@ -16,7 +16,7 @@
 
 import type { TextureAtlas } from './atlas.js';
 import type { StateSource } from './mesher.js';
-import type { BakedItems, ItemIcon, WireIcon } from '../server/item-bake.js';
+import type { BakedItems, HeldContext, ItemIcon, ItemTransform, WireIcon } from '../server/item-bake.js';
 import { decodeIcon } from '../server/item-bake.js';
 
 /** Rendered size of one icon, in CSS pixels before any hotbar scaling. */
@@ -62,6 +62,20 @@ export class ItemIcons {
 
   has(itemId: string): boolean {
     return this.deps.meta.icons[itemId] !== undefined;
+  }
+
+  /**
+   * How this item is held in a given context, from its model's `display` block.
+   *
+   * Null when the bake carried no transforms, or the item has no `display` anywhere in its
+   * parent chain — the caller then draws it untransformed, which is what it did before these
+   * were extracted.
+   */
+  transformFor(itemId: string, context: HeldContext): ItemTransform | null {
+    const meta = this.deps.meta;
+    const i = meta.itemTransforms?.[itemId];
+    if (i === undefined) return null;
+    return meta.transforms?.[i]?.[context] ?? null;
   }
 
   /**

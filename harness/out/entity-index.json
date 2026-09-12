@@ -1,4 +1,234 @@
 {
+  "ae2:tiny_tnt_primed": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named TinyTntPrimed[Entity]Renderer in any mod jar"
+  },
+  "aeronauticsdiscovery:pillager_aviator": {
+    "renderer": "me.corvino.aeronauticsdiscovery.client.renderer.PillagerAviatorRenderer",
+    "model": null,
+    "texture": "assets/aeronauticsdiscovery/textures/entity/pillager_aviator.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/aeronauticsdiscovery/textures/entity/pillager_aviator.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "aeronauticsdiscovery:soaring_trader": {
+    "renderer": "me.corvino.aeronauticsdiscovery.client.renderer.SoaringTraderRenderer",
+    "model": null,
+    "texture": "assets/aeronauticsdiscovery/textures/entity/soaring_trader.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/aeronauticsdiscovery/textures/entity/soaring_trader.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "automobility:automobile": {
+    "renderer": "io.github.foundationgames.automobility.entity.render.AutomobileEntityRenderer",
+    "model": null,
+    "texture": "assets/automobility/textures/entity/automobile/rear_attachment/auto_mechanic_table.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/automobility/textures/entity/automobile/rear_attachment/auto_mechanic_table.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_sparks_1.png", "assets/automobility/textures/entity/automobile/frame/prismarine_rickshaw.png", "assets/automobility/textures/entity/automobile/frame/green_tractor.png", "assets/automobility/textures/entity/automobile/frame/standard_cyan.png", "assets/automobility/textures/entity/automobile/wheel/steel.png", "assets/automobility/textures/entity/automobile/rear_attachment/chest.png", "assets/automobility/textures/entity/automobile/rear_attachment/saddled_barrel.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_debris_2.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_hot_sparks_0.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_cool_sparks_0.png", "assets/automobility/textures/entity/automobile/rear_attachment/cartography_table.png", "assets/automobility/textures/entity/automobile/rear_attachment/painter.png", "assets/automobility/textures/entity/automobile/wheel/street.png", "assets/automobility/textures/entity/automobile/rear_attachment/crafting_table.png", "assets/automobility/textures/entity/automobile/frame/wooden_motorcar.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_smoke_1.png", "assets/automobility/textures/entity/automobile/frame/standard_orange.png", "assets/automobility/textures/entity/automobile/frame/standard_magenta.png", "assets/automobility/textures/entity/automobile/frame/pineapple_src.png", "assets/automobility/textures/entity/automobile/wheel/plated.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_flames_2.png", "assets/automobility/textures/entity/automobile/frame/standard_black.png", "assets/automobility/textures/entity/automobile/frame/golden_motorcar.png", "assets/automobility/textures/entity/automobile/rear_attachment/grindstone.png", "assets/automobility/textures/entity/automobile/rear_attachment/smithing_table.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_sparks_2.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_flames_0.png", "assets/automobility/textures/entity/automobile/frame/steel_motorcar.png", "assets/automobility/textures/entity/automobile/engine/copper.png", "assets/automobility/textures/entity/automobile/frame/standard_purple.png", "assets/automobility/textures/entity/automobile/front_attachment/grass_cutter.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_cool_sparks_1.png", "assets/automobility/textures/entity/automobile/frame/standard_red.png", "assets/automobility/textures/entity/automobile/frame/standard_light_blue.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_smoke_2.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_flames_3.png", "assets/automobility/textures/entity/automobile/wheel/standard.png", "assets/automobility/textures/entity/automobile/wheel/bejeweled.png", "assets/automobility/textures/entity/automobile/frame/copper_motorcar.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_smoke_3.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_hot_sparks_1.png", "assets/automobility/textures/entity/automobile/rear_attachment/ender_chest.png", "assets/automobility/textures/entity/automobile/rear_attachment/banner_post.png", "assets/automobility/textures/entity/automobile/rear_attachment/stonecutter.png", "assets/automobility/textures/entity/automobile/frame/standard_brown.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_hot_sparks_2.png", "assets/automobility/textures/entity/automobile/engine/diamond.png", "assets/automobility/textures/entity/automobile/frame/standard_white.png", "assets/automobility/textures/entity/automobile/wheel/off_road.png", "assets/automobility/textures/entity/automobile/frame/standard_blue.png", "assets/automobility/textures/entity/automobile/frame/yellow_tractor.png", "assets/automobility/textures/entity/automobile/rear_attachment/backhoe.png", "assets/automobility/textures/entity/automobile/frame/blue_tractor.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_smoke_2.png", "assets/automobility/textures/entity/automobile/rear_attachment/loom.png", "assets/automobility/textures/entity/automobile/engine/gold.png", "assets/automobility/textures/entity/automobile/front_attachment/crop_harvester.png", "assets/automobility/textures/entity/automobile/wheel/carriage.png", "assets/automobility/textures/entity/automobile/frame/standard_pink.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_flames_2.png", "assets/automobility/textures/entity/automobile/frame/standard_lime.png", "assets/automobility/textures/entity/automobile/engine/iron.png", "assets/automobility/textures/entity/automobile/frame/echo_rickshaw.png", "assets/automobility/textures/entity/automobile/wheel/tractor.png", "assets/automobility/textures/entity/automobile/frame/amethyst_rickshaw.png", "assets/automobility/textures/entity/automobile/wheel/gilded.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_debris_0.png", "assets/automobility/textures/entity/automobile/frame/red_tractor.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_smoke_1.png", "assets/automobility/textures/entity/automobile/engine/stone.png", "assets/automobility/textures/entity/automobile/rear_attachment/paver.png", "assets/automobility/textures/entity/automobile/frame/shopping_cart.png", "assets/automobility/textures/entity/automobile/front_attachment/autopilot.png", "assets/automobility/textures/entity/automobile/frame/standard_green.png", "assets/automobility/textures/entity/automobile/frame/bejeweled_motorcar.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_flames_1.png", "assets/automobility/textures/entity/automobile/engine/creative.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_flames_0.png", "assets/automobility/textures/entity/automobile/frame/pineapple.png", "assets/automobility/textures/entity/automobile/front_attachment/mob_controller.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_sparks_0.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_debris_1.png", "assets/automobility/textures/entity/automobile/rear_attachment/passenger_seat.png", "assets/automobility/textures/entity/automobile/frame/quartz_rickshaw.png", "assets/automobility/textures/entity/automobile/frame/standard_gray.png", "assets/automobility/textures/entity/automobile/frame/wooden_motorcar_old.png", "assets/automobility/textures/entity/automobile/skid_effect/skid_cool_sparks_2.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_smoke_0.png", "assets/automobility/textures/entity/automobile/frame/standard_yellow.png", "assets/automobility/textures/entity/automobile/frame/c_arr.png", "assets/automobility/textures/entity/automobile/frame/standard_light_gray.png", "assets/automobility/textures/entity/automobile/exhaust/exhaust_flames_1.png", "assets/automobility/textures/entity/automobile/skid_effect/old/skid_smoke_0.png"],
+    "texturesVerifiedInJars": "94/94",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "automobility:hitbox": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Hitbox[Entity]Renderer in any mod jar"
+  },
+  "barrel:working": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Working[Entity]Renderer in any mod jar"
+  },
+  "beekeeper:messagenobees": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagenobees[Entity]Renderer in any mod jar"
+  },
+  "beekeeper:messagenohives": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagenohives[Entity]Renderer in any mod jar"
+  },
+  "builder:cantdeconstruct": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Cantdeconstruct[Entity]Renderer in any mod jar"
+  },
+  "builder:inventoryfull": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Inventoryfull[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildcomplete": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildcomplete[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildernecessary": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildernecessary[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuilderstoofar": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuilderstoofar[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildmanualfinish": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildmanualfinish[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildstart": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildstart[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildtoohigh": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildtoohigh[Entity]Renderer in any mod jar"
+  },
+  "builder:messagebuildtoolow": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagebuildtoolow[Entity]Renderer in any mod jar"
+  },
+  "builder:messageneedmaterial": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messageneedmaterial[Entity]Renderer in any mod jar"
+  },
+  "builder:messagenobuilder": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagenobuilder[Entity]Renderer in any mod jar"
+  },
+  "builder:messageremovalcomplete": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messageremovalcomplete[Entity]Renderer in any mod jar"
+  },
+  "builder:messagerepaircomplete": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagerepaircomplete[Entity]Renderer in any mod jar"
+  },
+  "cavalry:nohorse": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Nohorse[Entity]Renderer in any mod jar"
+  },
+  "composter:noitems": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Noitems[Entity]Renderer in any mod jar"
+  },
   "corpse:corpse": {
     "renderer": "de.maxhenkel.corpse.entities.CorpseRenderer",
     "model": "minecraft:player#main",
@@ -9,6 +239,436 @@
     "texturesVerifiedInJars": "2/2",
     "resolvedBy": "manual: CorpseRenderer delegates to the vanilla player renderer (DummyPlayer) or skeleton renderer (DummySkeleton); texture is the dead player's skin at runtime"
   },
+  "corpse:corpse_of": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named CorpseOf[Entity]Renderer in any mod jar"
+  },
+  "create:carriage_contraption": {
+    "renderer": "com.simibubi.create.content.trains.entity.CarriageContraptionEntityRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create:contraption": {
+    "renderer": "com.simibubi.create.content.contraptions.render.ContraptionEntityRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create:crafting_blueprint": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named CraftingBlueprint[Entity]Renderer in any mod jar"
+  },
+  "create:gantry_contraption": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named GantryContraption[Entity]Renderer in any mod jar"
+  },
+  "create:package": {
+    "renderer": "com.simibubi.create.content.logistics.box.PackageRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create:potato_projectile": {
+    "renderer": "com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create:seat": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Seat[Entity]Renderer in any mod jar"
+  },
+  "create:stationary_contraption": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named StationaryContraption[Entity]Renderer in any mod jar"
+  },
+  "create:super_glue": {
+    "renderer": "com.simibubi.create.content.contraptions.glue.SuperGlueRenderer",
+    "model": null,
+    "texture": "assets/create/textures/entity/super_glue/slime.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/create/textures/entity/super_glue/slime.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create_abyss:amphistium": {
+    "renderer": "com.maxenonyme.AbyssDimension.client.renderer.AmphistiumRenderer",
+    "model": null,
+    "texture": "assets/create_abyss/textures/entity/amphistium.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/create_abyss/textures/entity/amphistium.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "create_abyss:cookiecutter_shark": {
+    "renderer": "com.maxenonyme.AbyssDimension.client.renderer.CookiecutterSharkRenderer",
+    "model": null,
+    "texture": "assets/create_abyss/textures/entity/cookiecutter_shark_texture.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/create_abyss/textures/entity/cookiecutter_shark_texture.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:ap_autocannon": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named ApAutocannon[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:ap_shell": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named ApShell[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:ap_shot": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named ApShot[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:bag_of_grapeshot": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named BagOfGrapeshot[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:cannon_carriage": {
+    "renderer": "rbasamoyai.createbigcannons.cannon_control.carriage.CannonCarriageRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:drop_mortar_shell": {
+    "renderer": "rbasamoyai.createbigcannons.munitions.big_cannon.drop_mortar_shell.DropMortarShellRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:flak_autocannon": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named FlakAutocannon[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:flak_burst": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named FlakBurst[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:fluid_blob_burst": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named FluidBlobBurst[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:fluid_shell": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named FluidShell[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:gas_cloud": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named GasCloud[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:grapeshot_burst": {
+    "renderer": "rbasamoyai.createbigcannons.munitions.big_cannon.grapeshot.GrapeshotBurstRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:he_shell": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named HeShell[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:machine_gun_bullet": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named MachineGunBullet[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:mortar_stone": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named MortarStone[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:pitch_contraption": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named PitchContraption[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:primed_propellant": {
+    "renderer": "rbasamoyai.createbigcannons.munitions.big_cannon.propellant.PrimedPropellantRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:shot": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Shot[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:shrapnel_burst": {
+    "renderer": "rbasamoyai.createbigcannons.munitions.big_cannon.shrapnel.ShrapnelBurstRenderer",
+    "model": null,
+    "texture": "assets/createbigcannons/textures/entity/shrapnel.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/createbigcannons/textures/entity/shrapnel.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "createbigcannons:shrapnel_shell": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named ShrapnelShell[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:smoke_emitter": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named SmokeEmitter[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:smoke_shell": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named SmokeShell[Entity]Renderer in any mod jar"
+  },
+  "createbigcannons:traffic_cone": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named TrafficCone[Entity]Renderer in any mod jar"
+  },
+  "createthrusters:player_mannequin": {
+    "renderer": "com.rieno.gadgetsandgizmos.neoforge.client.PlayerMannequinRenderer",
+    "model": "minecraft:player#main",
+    "texture": null,
+    "hasGeometry": true,
+    "allModels": ["minecraft:player#main", "minecraft:player#inner_armor", "minecraft:player#outer_armor"],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "deliveryman:forcepickup": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Forcepickup[Entity]Renderer in any mod jar"
+  },
+  "deliveryman:forcepickupfailed": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Forcepickupfailed[Entity]Renderer in any mod jar"
+  },
+  "farmer:needseed": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Needseed[Entity]Renderer in any mod jar"
+  },
+  "farmer:nofreefields": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Nofreefields[Entity]Renderer in any mod jar"
+  },
+  "farmersdelight:rotten_tomato": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named RottenTomato[Entity]Renderer in any mod jar"
+  },
+  "fisherman:messagesuboptimalpond": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagesuboptimalpond[Entity]Renderer in any mod jar"
+  },
+  "fisherman:messagewatertoofar": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagewatertoofar[Entity]Renderer in any mod jar"
+  },
   "friendsandfoes:copper_golem": {
     "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.CopperGolemEntityRenderer",
     "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.CopperGolemEntityModel#getTexturedModelData",
@@ -17,6 +677,36 @@
     "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.CopperGolemEntityModel#getTexturedModelData"],
     "allTextures": ["assets/friendsandfoes/textures/entity/copper_golem/copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/exposed_copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/weathered_copper_golem.png", "assets/friendsandfoes/textures/entity/copper_golem/oxidized_copper_golem.png"],
     "texturesVerifiedInJars": "4/4",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:crab": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.CrabEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.CrabEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/crab/crab.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.CrabEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/crab/crab.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:glare": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.GlareEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.GlareEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/glare/glare.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.GlareEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/glare/glare.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:iceologer": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.IceologerEntityRenderer",
+    "model": "class:net.minecraft.client.model.IllagerModel#createBodyLayer",
+    "texture": "assets/friendsandfoes/textures/entity/illager/iceologer.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.minecraft.client.model.IllagerModel#createBodyLayer"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/illager/iceologer.png"],
+    "texturesVerifiedInJars": "1/1",
     "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
   },
   "friendsandfoes:illusioner": {
@@ -49,6 +739,16 @@
     "texturesVerifiedInJars": "1/1",
     "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
   },
+  "friendsandfoes:player_illusion": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.PlayerIllusionEntityRenderer",
+    "model": "minecraft:player_slim#main",
+    "texture": null,
+    "hasGeometry": true,
+    "allModels": ["minecraft:player_slim#main", "minecraft:player#main", "minecraft:player_slim#inner_armor", "minecraft:player#inner_armor", "minecraft:player_slim#outer_armor", "minecraft:player#outer_armor"],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
   "friendsandfoes:rascal": {
     "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.RascalEntityRenderer",
     "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.RascalEntityModel#getTexturedModelData",
@@ -58,6 +758,486 @@
     "allTextures": ["assets/friendsandfoes/textures/entity/rascal/rascal.png"],
     "texturesVerifiedInJars": "1/1",
     "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:tuff_golem": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.TuffGolemEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.TuffGolemEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/tuff_golem/tuff_golem.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.TuffGolemEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/tuff_golem/tuff_golem.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "friendsandfoes:wildfire": {
+    "renderer": "com.faboslav.friendsandfoes.common.client.render.entity.renderer.WildfireEntityRenderer",
+    "model": "class:com.faboslav.friendsandfoes.common.client.render.entity.model.WildfireEntityModel#getTexturedModelData",
+    "texture": "assets/friendsandfoes/textures/entity/wildfire/wildfire.png",
+    "hasGeometry": true,
+    "allModels": ["class:com.faboslav.friendsandfoes.common.client.render.entity.model.WildfireEntityModel#getTexturedModelData"],
+    "allTextures": ["assets/friendsandfoes/textures/entity/wildfire/wildfire.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "garnished:nut_boat": {
+    "renderer": "net.dakotapride.garnished.entity.render.NutBoatRenderer",
+    "model": "class:net.minecraft.client.model.ChestBoatModel#createBodyModel",
+    "texture": null,
+    "hasGeometry": true,
+    "allModels": ["class:net.minecraft.client.model.ChestBoatModel#createBodyModel", "class:net.minecraft.client.model.BoatModel#createBodyModel"],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "garnished:nut_chest_boat": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named NutChestBoat[Entity]Renderer in any mod jar"
+  },
+  "immersive_aircraft:airship": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.AirshipEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/airship.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/airship.png", "assets/immersive_aircraft/textures/entity/airship_color.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:bamboo_hopper": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.BambooHopperEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/bamboo_hopper.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/bamboo_hopper.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:biplane": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.BiplaneEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/biplane.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/biplane.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:cargo_airship": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.CargoAirshipEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/cargo_airship.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/cargo_airship.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:gyrodyne": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.GyrodyneEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/gyrodyne.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/gyrodyne.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:quadrocopter": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.QuadrocopterEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/quadrocopter.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/quadrocopter.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "immersive_aircraft:warship": {
+    "renderer": "immersive_aircraft.client.render.entity.renderer.WarshipEntityRenderer",
+    "model": null,
+    "texture": "assets/immersive_aircraft/textures/entity/warship.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/immersive_aircraft/textures/entity/warship.png", "assets/immersive_aircraft/textures/entity/warship_color.png"],
+    "texturesVerifiedInJars": "2/2",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "minecolonies:amazon": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Amazon[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:amazonchief": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Amazonchief[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:amazonspearman": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Amazonspearman[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:archerbarbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Archerbarbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:archermummy": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Archermummy[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:archerpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Archerpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:barbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Barbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campamazon": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campamazon[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campamazonchief": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campamazonchief[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campamazonspearman": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campamazonspearman[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:camparcherbarbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Camparcherbarbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:camparchermummy": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Camparchermummy[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:camparcherpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Camparcherpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campbarbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campbarbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campchiefbarbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campchiefbarbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campchiefpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campchiefpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campdrownedarcherpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campdrownedarcherpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campdrownedchiefpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campdrownedchiefpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campdrownedpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campdrownedpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campmummy": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campmummy[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campnorsemenarcher": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campnorsemenarcher[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campnorsemenchief": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campnorsemenchief[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:camppharao": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Camppharao[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:camppirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Camppirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:campshieldmaiden": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Campshieldmaiden[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:cavalry_horse": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named CavalryHorse[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:chiefbarbarian": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Chiefbarbarian[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:chiefpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Chiefpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:drownedarcherpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Drownedarcherpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:drownedchiefpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Drownedchiefpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:drownedpirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Drownedpirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:mummy": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Mummy[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:norsemenarcher": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Norsemenarcher[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:norsemenchief": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Norsemenchief[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:pharao": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Pharao[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:pirate": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Pirate[Entity]Renderer in any mod jar"
+  },
+  "minecolonies:shieldmaiden": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Shieldmaiden[Entity]Renderer in any mod jar"
   },
   "minecraft:allay": {
     "renderer": "net.minecraft.client.renderer.entity.AllayRenderer",
@@ -112,11 +1292,11 @@
   "minecraft:axolotl": {
     "renderer": "net.minecraft.client.renderer.entity.AxolotlRenderer",
     "model": "minecraft:axolotl#main",
-    "texture": "assets/minecraft/textures/entity/axolotl/axolotl_%s.png",
+    "texture": null,
     "hasGeometry": true,
     "allModels": ["minecraft:axolotl#main"],
-    "allTextures": ["assets/minecraft/textures/entity/axolotl/axolotl_%s.png"],
-    "texturesVerifiedInJars": "0/1",
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
     "resolvedBy": "registry+bytecode"
   },
   "minecraft:bat": {
@@ -1352,5 +2532,175 @@
     "allTextures": ["assets/minecraft/textures/entity/piglin/piglin.png", "assets/minecraft/textures/entity/piglin/zombified_piglin.png", "assets/minecraft/textures/entity/piglin/piglin_brute.png"],
     "texturesVerifiedInJars": "3/3",
     "resolvedBy": "registry+bytecode"
+  },
+  "miner:invalidmineshaft": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Invalidmineshaft[Entity]Renderer in any mod jar"
+  },
+  "miner:messagerequiresbetterhut": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Messagerequiresbetterhut[Entity]Renderer in any mod jar"
+  },
+  "powergrid:block_wire": {
+    "renderer": "org.patryk3211.powergrid.electricity.wire.BlockWireRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "powergrid:cord": {
+    "renderer": "org.patryk3211.powergrid.electricity.wire.powercord.CordRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "powergrid:hanging_wire": {
+    "renderer": "org.patryk3211.powergrid.electricity.wire.HangingWireRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "powergrid:string_light_cord": {
+    "renderer": "org.patryk3211.powergrid.electricity.light.string.StringLightCordRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "powergrid:zap_projectile": {
+    "renderer": "org.patryk3211.powergrid.equipment.zapper.ZapProjectileRenderer",
+    "model": null,
+    "texture": "assets/powergrid/textures/entity/zap_projectile.png",
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": ["assets/powergrid/textures/entity/zap_projectile.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "railways:benchcart": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Benchcart[Entity]Renderer in any mod jar"
+  },
+  "railways:conductor": {
+    "renderer": "com.railwayteam.railways.content.conductor.ConductorRenderer",
+    "model": "minecraft:armor_stand#inner_armor",
+    "texture": "assets/railways/textures/entity/conductor.png",
+    "hasGeometry": true,
+    "allModels": ["minecraft:armor_stand#inner_armor", "minecraft:armor_stand#outer_armor"],
+    "allTextures": ["assets/railways/textures/entity/conductor.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "railways:jukeboxcart": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Jukeboxcart[Entity]Renderer in any mod jar"
+  },
+  "researcher:moreknowledge": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Moreknowledge[Entity]Renderer in any mod jar"
+  },
+  "spell_engine:spell_area_effect": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named SpellAreaEffect[Entity]Renderer in any mod jar"
+  },
+  "spell_engine:spell_projectile": {
+    "renderer": "net.spell_engine.client.render.SpellProjectileRenderer",
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "wizards:arcane_emitter": {
+    "renderer": "net.wizards.client.entity.ArcaneEmitterRenderer",
+    "model": "class:net.wizards.client.entity.ArcaneEmitterModel#getTexturedModelData",
+    "texture": "assets/wizards/textures/entity/arcane_emitter.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.wizards.client.entity.ArcaneEmitterModel#getTexturedModelData"],
+    "allTextures": ["assets/wizards/textures/entity/arcane_emitter.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "wizards:fire_hydra": {
+    "renderer": "net.wizards.client.entity.FireHydraRenderer",
+    "model": "class:net.wizards.client.entity.FireHydraModel#getTexturedModelData",
+    "texture": "assets/wizards/textures/entity/fire_hydra.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.wizards.client.entity.FireHydraModel#getTexturedModelData"],
+    "allTextures": ["assets/wizards/textures/entity/fire_hydra.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "wizards:frost_elemental": {
+    "renderer": "net.wizards.client.entity.FrostElementalRenderer",
+    "model": "class:net.wizards.client.entity.FrostElementalModel#getTexturedModelData",
+    "texture": "assets/wizards/textures/entity/frost_elemental.png",
+    "hasGeometry": true,
+    "allModels": ["class:net.wizards.client.entity.FrostElementalModel#getTexturedModelData"],
+    "allTextures": ["assets/wizards/textures/entity/frost_elemental.png"],
+    "texturesVerifiedInJars": "1/1",
+    "resolvedBy": "heuristic: renderer class matched by name, model+texture read from its bytecode"
+  },
+  "worker:inventoryfullchestfull": {
+    "renderer": null,
+    "model": null,
+    "texture": null,
+    "hasGeometry": false,
+    "allModels": [],
+    "allTextures": [],
+    "texturesVerifiedInJars": "0/0",
+    "resolvedBy": "unresolved: no *Renderer class named Inventoryfullchestfull[Entity]Renderer in any mod jar"
   }
 }

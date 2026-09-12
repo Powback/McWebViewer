@@ -25,8 +25,15 @@
 import * as THREE from 'three';
 import type { TrackPose } from '../app/player-tracks.js';
 
-/** World height of the label at TAG_FULL_SIZE_M and closer, in blocks. */
-const TAG_HEIGHT = 0.45;
+/**
+ * World height of the label at TAG_FULL_SIZE_M and closer, in blocks.
+ *
+ * 0.28 rather than 0.45 (the user, 2026-09-11: "make the labels smaller"): with a dozen drones and
+ * players in one bay the tags were covering the machines they float over. The canvas is still
+ * rendered at FONT_PX and scaled down, so this costs no sharpness -- it is the sprite that shrinks,
+ * not the text raster.
+ */
+const TAG_HEIGHT = 0.28;
 /** Past this distance the label stops shrinking on screen. */
 const TAG_FULL_SIZE_M = 24;
 /** A player is 1.8 blocks tall; the tag floats just clear of the head. */

@@ -398,9 +398,25 @@ function main(): void {
   };
   mkdirSync(resolve(args.out, '..'), { recursive: true });
   writeFileSync(args.out, JSON.stringify(bundle));
+  writeIndex(resolve(args.out, '..'));
 
   const pass = Object.values(results).filter((r) => r.ok).length;
   console.log(`\n${pass}/${programs.size} programs translated -> ${args.out}`);
+}
+
+/**
+ * The list the in-page shaderpack selector reads, rebuilt from what is actually on disk.
+ *
+ * Written HERE rather than maintained by hand because a hand-written list goes stale the
+ * first time someone builds a second pack, and a selector offering a pack that 404s is worse
+ * than one offering none. The directory is the truth; this just publishes it.
+ */
+function writeIndex(dir: string): void {
+  const packs = readdirSync(dir)
+    .filter((f) => f.endsWith('.bundle.json'))
+    .map((f) => ({ id: f.replace(/\.bundle\.json$/, '') }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  writeFileSync(join(dir, 'index.json'), JSON.stringify({ packs }, null, 1));
 }
 
 function serialiseConsts(files: Map<string, string>) {

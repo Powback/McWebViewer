@@ -20,7 +20,11 @@
     "test": "tsx --test src/**/*.test.ts && node --test bridge/src/*.test.mjs",
     "build-shaderpack": "tsx src/tools/build-shaderpack.ts",
     "shader-audit": "tsx src/tools/shader-audit.ts",
-    "bake-assets": "tsx src/tools/bake-assets.ts"
+    "bake-assets": "tsx src/tools/bake-assets.ts",
+    "spacetime-proof": "tsx src/tools/spacetime-proof.ts",
+    "gen-bindings": "spacetimedb-cli generate --lang typescript --bin-path ../mcspacetime/module/spacetimedb/target/wasm32-unknown-unknown/release/mcspacetime.wasm -o src/module_bindings -y",
+    "fetch-sounds": "node scripts/fetch-sounds.mjs",
+    "watch": "vite build --watch"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +44,7 @@
   },
   "dependencies": {
     "fflate": "^0.8.3",
+    "spacetimedb": "^2.10.0",
     "three": "^0.185.1"
   }
 }

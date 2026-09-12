@@ -166,8 +166,17 @@ public final class ExtractModels {
 			verifyTextures(e);
 		}
 
-		// ---------- 3b. modded entity types from the audit list ----------
-		List<String> needed = auditFile != null ? readAuditJavaModel(auditFile) : new ArrayList<>();
+		// ---------- 3b. modded entity types ----------
+		// Driven by every entity a mod DECLARES, not by whichever ones happened to be loaded
+		// when somebody ran the audit. A world snapshot is the wrong input for this: mobs
+		// spawn, despawn and wander, so a type missing from the snapshot never got resolved
+		// and then rendered as nothing for ever. `friendsandfoes:glare` was 28 invisible mobs
+		// for exactly that reason, with its geometry already sitting in entity-models.json.
+		List<String> needed = new ArrayList<>(entityIdsFromLang(modJars));
+		for (String id : (auditFile != null ? readAuditJavaModel(auditFile) : new ArrayList<String>())) {
+			if (!needed.contains(id)) needed.add(id);
+		}
+		log("mod entity types to resolve: " + needed.size());
 		resolveModEntities(needed, modJars, entities);
 
 		// ---------- 4. write output ----------
@@ -553,7 +562,10 @@ public final class ExtractModels {
 								layerFields.add(name);
 						}
 						@Override public void visitLdcInsn(Object v) {
-							if (v instanceof String str && str.startsWith("textures/entity") && str.endsWith(".png"))
+							// A `%s` here is a format string the renderer expands per variant, not a
+							// file — see isTemplatePath.
+							if (v instanceof String str && str.startsWith("textures/entity")
+								&& str.endsWith(".png") && !isTemplatePath(str))
 								textures.add("assets/minecraft/" + str);
 						}
 					};
@@ -611,6 +623,19 @@ public final class ExtractModels {
 			e.primaryTexture = hits.get(0);
 			e.how = e.how + " + texture by filename heuristic";
 		}
+	}
+
+	/**
+	 * A `%s` in a texture path is a FORMAT STRING, not a file.
+	 *
+	 * Renderers that pick a texture per variant build the path at runtime, and recording the
+	 * unexpanded template as if it were an asset leaves a sprite that can never be found —
+	 * one permanently "missing" entry in every atlas, and an entity that draws nothing. The
+	 * variant tables in physics.json carry the real paths; dropping the template here lets
+	 * the renderer's variant fallback supply one instead.
+	 */
+	static boolean isTemplatePath(String path) {
+		return path != null && path.contains("%");
 	}
 
 	static void verifyTextures(EntityInfo e) {
@@ -689,7 +714,9 @@ public final class ExtractModels {
 								if (op == Opcodes.NEW && type.endsWith("Model")) modelClasses.add(type.replace('/', '.'));
 							}
 							@Override public void visitLdcInsn(Object v) {
-								if (v instanceof String str && str.startsWith("textures/") && str.endsWith(".png")) strings.add(str);
+								// Same template rule as the vanilla scan; see isTemplatePath.
+							if (v instanceof String str && str.startsWith("textures/")
+								&& str.endsWith(".png") && !isTemplatePath(str)) strings.add(str);
 							}
 						};
 					}
@@ -846,7 +873,11 @@ public final class ExtractModels {
 		for (int i = 0; i < ids.size(); i++) {
 			EntityInfo e = entities.get(ids.get(i));
 			sb.append("  ").append(q(e.id)).append(": {\n");
-			sb.append("    \"renderer\": ").append(q(e.renderer)).append(",\n");
+			// An entity we could not resolve has no renderer, and writing the index must not
+			// die on it — the row is the RECORD that it was tried and failed, which is more
+			// use than a crash that loses the whole index. Latent until the needed list was
+			// widened past the ids that all happened to resolve.
+			sb.append("    \"renderer\": ").append(e.renderer == null ? "null" : q(e.renderer)).append(",\n");
 			sb.append("    \"model\": ").append(e.primaryLayer == null ? "null" : q(e.primaryLayer)).append(",\n");
 			sb.append("    \"texture\": ").append(e.primaryTexture == null ? "null" : q(e.primaryTexture)).append(",\n");
 			sb.append("    \"hasGeometry\": ").append(e.primaryLayer != null && models.containsKey(e.primaryLayer)).append(",\n");
@@ -914,6 +945,37 @@ public final class ExtractModels {
 	 * geometry) and "extracted-model" (already fed from this harness), so re-running after the
 	 * renderer has adopted the output still reports the full set rather than an empty one.
 	 */
+	/**
+	 * Every entity id the mod jars declare, from their own language files.
+	 *
+	 * `assets/<ns>/lang/en_us.json` carries an `entity.<ns>.<name>` key for every entity a
+	 * mod registers — it has to, or the entity has no name in-game. That makes it a complete,
+	 * offline, world-independent list, which is exactly what the renderer resolution needs
+	 * and what the audit file was a poor substitute for. Measured on this pack: 141 ids.
+	 */
+	static Set<String> entityIdsFromLang(List<Path> modJars) {
+		Set<String> out = new java.util.TreeSet<>();
+		java.util.regex.Pattern key =
+			java.util.regex.Pattern.compile("\"entity\\.([a-z0-9_]+)\\.([a-z0-9_/]+)\"");
+		for (Path jar : modJars) {
+			try (ZipFile zf = new ZipFile(jar.toFile())) {
+				for (java.util.Enumeration<? extends ZipEntry> en = zf.entries(); en.hasMoreElements(); ) {
+					ZipEntry e = en.nextElement();
+					String n = e.getName();
+					if (!n.startsWith("assets/") || !n.endsWith("/lang/en_us.json")) continue;
+					String text = new String(RemapJar.readAll(zf.getInputStream(e)), StandardCharsets.UTF_8);
+					java.util.regex.Matcher m = key.matcher(text);
+					while (m.find()) {
+						// `entity.minecraft.*` in a mod's lang file is an override of a vanilla
+						// name, not a new entity, and vanilla is already resolved from bytecode.
+						if (!"minecraft".equals(m.group(1))) out.add(m.group(1) + ":" + m.group(2));
+					}
+				}
+			} catch (Throwable ignored) { /* a jar we cannot read contributes nothing */ }
+		}
+		return out;
+	}
+
 	static List<String> readAuditJavaModel(Path audit) {
 		List<String> out = new ArrayList<>();
 		try {

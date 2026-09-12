@@ -10,8 +10,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_COMMANDS, FakePlayer, angleDelta, isCommandMissing, isValidBotName, mcRotation,
-  template,
+  DEFAULT_COMMANDS, FakePlayer, GOTO_KEEPALIVE_MS, angleDelta, isCommandMissing,
+  isValidBotName, mcRotation, template,
 } from './fake-player.mjs';
 
 /** Records every command issued, and replies with whatever the test scripted. */
@@ -144,26 +144,81 @@ test('an illegal bot name is refused before any command is built', async () => {
   assert.match(fp.status().reason, /not a legal player name/);
 });
 
-test('with the mod present, movement is sent on CHANGE only', async () => {
+test('a direction key sends NO movement command — position drives the body now', async () => {
+  // `move forward` is a per-TICK input, so distance per real second followed the tick rate:
+  // measured on the dev replica, one second of walking covered 4.17 blocks at 20 ticks and
+  // 16.70 at 200, and this world targets 200. Movement is a displacement now, sent as
+  // `goto`, so holding a key emits nothing by itself.
   const { fp, sent } = harness({ reply: 'WebViewer joined the game' });
   assert.equal(await fp.join(), true);
-  assert.equal(fp.active, true);
   sent.length = 0;
 
   await fp.input({ forward: true });
   await fp.input({ forward: true });
-  await fp.input({ forward: true });
-  assert.deepEqual(sent, ['player WebViewer move forward'], 'held keys must not repeat');
-
   await fp.input({ forward: false, back: true });
   await fp.input({});
-  // NOT a bare `move` — SiliconeDolls rejects that; it stops with `stop`. Verified
-  // against the live server.
-  assert.deepEqual(sent, [
-    'player WebViewer move forward',
-    'player WebViewer move back',
-    'player WebViewer stop',
-  ]);
+  assert.deepEqual(sent, [], 'a direction must not send a per-tick move command');
+});
+
+test('goto places the body exactly where the simulation says', async () => {
+  const { fp, sent } = harness({ reply: 'WebViewer joined the game' });
+  assert.equal(await fp.join(), true);
+  sent.length = 0;
+  await fp.goto({ x: 64, y: 68, z: 40.317 });
+  assert.deepEqual(sent, ['tp WebViewer 64.000 68.000 40.317']);
+});
+
+test('goto is rate-limited, so a 60 Hz browser does not flood one RCON pipe', async () => {
+  const { fp, sent } = harness({ reply: 'WebViewer joined the game' });
+  assert.equal(await fp.join(), true);
+  sent.length = 0;
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  await fp.goto({ x: 1, y: 2, z: 4 });
+  await fp.goto({ x: 1, y: 2, z: 5 });
+  assert.equal(sent.length, 1, 'three placements inside the window must send one command');
+});
+
+/**
+ * STANDING STILL DOES NOT COST NOTHING, and believing it did dropped the bot into the void.
+ *
+ * This test used to assert the opposite — a repeated position was skipped outright, because
+ * re-teleporting a body to where it already is looks like pure waste. It is waste only if
+ * the SERVER agrees the body is standing on something. It has its own gravity and runs it at
+ * this world's tick rate (a 200/s target, about 145 in practice), so a bot it thinks is
+ * unsupported falls about seven times faster in real time than a player does. The two only
+ * have to disagree about the floor once — a resync, a teleport, a chunk that has not
+ * streamed in yet — and with nothing being sent the bot simply fell. The browser then read
+ * it lower, reconciled down to it, and teleported it to the new lower place: a ratchet into
+ * the void. Measured on the live server standing perfectly still, y=48 to y=24 in twenty
+ * seconds.
+ *
+ * So a repeat is rate-limited exactly as a move is, and no more than that.
+ */
+test('a position the browser is holding is re-asserted, not assumed to hold', async () => {
+  const { fp, sent } = harness({ reply: 'WebViewer joined the game' });
+  assert.equal(await fp.join(), true);
+  sent.length = 0;
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  assert.equal(sent.length, 1);
+
+  // Inside the window a repeat still costs nothing: the rate limit is unchanged.
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  assert.equal(sent.length, 1, 'the rate limit still applies to repeats');
+
+  // Past it, the same position goes out again — that is what keeps the bot off the floor
+  // of the world when the server thinks there is nothing under it.
+  await new Promise((r) => setTimeout(r, GOTO_KEEPALIVE_MS + 10));
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  assert.deepEqual(sent, ['tp WebViewer 1.000 2.000 3.000', 'tp WebViewer 1.000 2.000 3.000'],
+    'a held position has to be re-asserted or the server walks off with the body');
+});
+
+test('a goto with a NaN coordinate is refused rather than teleporting into nowhere', async () => {
+  const { fp, sent } = harness({ reply: 'WebViewer joined the game' });
+  assert.equal(await fp.join(), true);
+  sent.length = 0;
+  await fp.goto({ x: Number.NaN, y: 68, z: 40 });
+  assert.deepEqual(sent, []);
 });
 
 test('look converts browser radians to Minecraft degrees, and refuses NaN', async () => {
@@ -338,7 +393,7 @@ test('syncRotation re-anchors the model from the server, so it cannot drift', as
   assert.deepEqual(sent, ['player WebViewer turn 90.0 0.0']);
 });
 
-test('halt stops the bot walking without making it leave', async () => {
+test('halt stops the bot without making it leave', async () => {
   const { fp, sent } = harness({ reply: 'ok' });
   await fp.join();
   await fp.input({ forward: true });
@@ -346,9 +401,10 @@ test('halt stops the bot walking without making it leave', async () => {
   await fp.halt();
   assert.deepEqual(sent, ['player WebViewer stop']);
   assert.equal(fp.joined, true, 'halt is not leave');
-  // And the next forward after a halt must be re-sent, not suppressed as "unchanged".
+  // Movement is a position now, so a direction key sends nothing after a halt either —
+  // the body simply stops being placed when the browser stops sending positions.
   await fp.input({ forward: true });
-  assert.deepEqual(sent, ['player WebViewer stop', 'player WebViewer move forward']);
+  assert.deepEqual(sent, ['player WebViewer stop']);
 });
 
 test('nothing is joined until Join is pressed', async () => {
@@ -386,7 +442,7 @@ test('leave is idempotent — a second disconnect must not re-kill', async () =>
   assert.deepEqual(sent, ['player WebViewer kill']);
 });
 
-test('rejoining after leaving works, and re-sends the held direction', async () => {
+test('rejoining after leaving works', async () => {
   const { fp, sent } = harness({ reply: 'ok' });
   await fp.join();
   await fp.input({ forward: true });
@@ -394,19 +450,20 @@ test('rejoining after leaving works, and re-sends the held direction', async () 
   sent.length = 0;
 
   await fp.join();
-  await fp.input({ forward: true });
-  assert.deepEqual(sent, ['player WebViewer spawn', 'player WebViewer move forward'],
-    'a fresh bot is not already walking, so the intent must be re-sent');
+  assert.deepEqual(sent, ['player WebViewer spawn']);
+  // And the fresh body can be placed straight away.
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  assert.deepEqual(sent, ['player WebViewer spawn', 'tp WebViewer 1.000 2.000 3.000']);
 });
 
 test('command strings are overridable for a mod that spells them differently', async () => {
   const { fp, sent } = harness({
     reply: 'ok',
-    commands: { spawn: 'dolls spawn {name}', moveForward: 'dolls {name} walk fwd' },
+    commands: { spawn: 'dolls spawn {name}', goto: 'dolls {name} at {x} {y} {z}' },
   });
   await fp.join();
-  await fp.input({ forward: true });
-  assert.deepEqual(sent, ['dolls spawn WebViewer', 'dolls WebViewer walk fwd']);
+  await fp.goto({ x: 1, y: 2, z: 3 });
+  assert.deepEqual(sent, ['dolls spawn WebViewer', 'dolls WebViewer at 1.000 2.000 3.000']);
 });
 
 // ---------------------------------------------------------------------------
@@ -439,15 +496,21 @@ test('releasing the mouse while walking does not also stop you walking', async (
   assert.deepEqual(sent, ['player WebViewer stop', 'player WebViewer move forward']);
 });
 
-test('releasing the key while digging does not also stop you digging', async () => {
+test('halt stops EVERYTHING, including a dig, and clears the intent', async () => {
+  // SiliconeDolls has exactly one stop and it cancels the lot. `halt` is the deliberate
+  // stop-everything path — focus loss, leaving — so it does NOT put the dig back; a page
+  // that has lost the keyboard must not leave a bot mining.
   const { fp, sent } = harness({ reply: 'ok' });
   await fp.join();
   await fp.dig(true);
-  await fp.input({ forward: true });
   sent.length = 0;
 
-  await fp.input({});
-  assert.deepEqual(sent, ['player WebViewer stop', 'player WebViewer attack continue']);
+  await fp.halt();
+  assert.deepEqual(sent, ['player WebViewer stop']);
+  // And the dig is genuinely forgotten, not merely paused.
+  sent.length = 0;
+  await fp.halt();
+  assert.deepEqual(sent, ['player WebViewer stop'], 'halt must be idempotent');
 });
 
 test('sneak and sprint are toggles, so they are sent only on a real change', async () => {

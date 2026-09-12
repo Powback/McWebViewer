@@ -298,7 +298,32 @@ export class Observer {
     if (msg.t === 'respawn') return this.#respawn();
     if (!this.fakePlayer.active) return;
     const handler = this.#actions[msg.t];
-    return handler ? handler(msg) : undefined;
+    if (!handler) return this.#unknownVerb(msg.t);
+    return handler(msg);
+  }
+
+  /**
+   * A verb this bridge does not know, said out loud once.
+   *
+   * IT USED TO BE DROPPED IN SILENCE, and that is how a shipped fix stayed invisible for three
+   * days. Movement was moved off the stateful per-tick `player <name> move forward` onto a
+   * position-driven `goto`, precisely so walking speed would stop scaling with the server's tick
+   * rate — but the bridge is a container, and the running one predated the change and had no
+   * `goto` in this table. The browser sent `goto` several times a second, every one fell through
+   * this line, movement fell back to the per-tick path, and the symptom was exactly the bug the
+   * fix had already solved. Nothing anywhere said so (2026-09-11).
+   *
+   * Once per verb, not per message: this is 20 Hz traffic and a log line per `goto` would be a
+   * denial of service on the thing meant to be read.
+   */
+  #unknownVerbs = new Set();
+  #unknownVerb(verb) {
+    const name = String(verb);
+    if (this.#unknownVerbs.has(name)) return;
+    this.#unknownVerbs.add(name);
+    this.log(`control verb "${name}" is not one this bridge knows -- it is being DROPPED.`
+      + ' A browser newer than this container will do this; rebuild it:'
+      + ' docker compose up -d --build mcwv-bridge');
   }
 
   /**
@@ -307,6 +332,9 @@ export class Observer {
    */
   #actions = {
     input: (m) => this.fakePlayer.input(m),
+    // Position, from the browser's local simulation. This is what actually moves the body —
+    // see the note on the `goto` command in fake-player.mjs.
+    goto: (m) => this.fakePlayer.goto(m),
     look: (m) => this.fakePlayer.look(Number(m.yaw), Number(m.pitch)),
     dig: (m) => this.fakePlayer.dig(m.down === true),
     attack: () => this.fakePlayer.action('dig'),

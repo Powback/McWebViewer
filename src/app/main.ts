@@ -16,6 +16,9 @@ import {
   makeContext, meshSection, type MeshContext, type StateSource,
 } from '../render/mesher.js';
 import { UNLOAD_DISTANCE, Viewer } from '../render/viewer.js';
+import {
+  DEFAULT_KEEP, DEFAULT_MESH, MAX_SECTION_BYTES, shouldKeep, shouldRecycle, type ViewPoint,
+} from '../render/section-budget.js';
 import { World } from '../render/world.js';
 import { RegionFile } from '../core/region.js';
 import { decodeContraption, isContraptionId, meshBlockSet, classifyEntity } from '../render/entities.js';
@@ -26,19 +29,24 @@ import {
 import type { NbtCompound, NbtList } from '../core/nbt.js';
 import { FlyControls } from './controls.js';
 import { ShaderView } from './shader-view.js';
+import { ShaderToggle, fetchPacks } from './shader-toggle.js';
 import { loadServedAssets, type ServedAssets } from '../render/served-assets.js';
 import { BakeRefresh } from './bake-refresh.js';
 import { PLAYER_TYPE, withPlayerModel } from '../render/player-model.js';
+import { appearanceOf, type EntityAppearance } from '../render/entity-layers.js';
 import { JoinButton } from './join-button.js';
 import { LiveView } from './live-view.js';
 import { fetchSpawn, type SpawnPoint } from './world-spawn.js';
 import { ChunkStreamer, parseStreamParam } from './chunk-stream.js';
+import { navWorld } from './nav-world.js';
 import { httpRangeFetch } from './region-sync.js';
 import type { ChunkColumn } from '../render/world.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
 const log = document.getElementById('log') as HTMLDivElement;
+
+
 const joinButton = new JoinButton({
   button: document.getElementById('join') as HTMLButtonElement,
   why: document.getElementById('join-why') as HTMLDivElement,
@@ -104,6 +112,12 @@ function renderModeButton() {
   const iso = live?.cameraMode === 'iso';
   modeButton.textContent = iso ? 'First person' : 'Isometric';
   modeButton.classList.toggle('iso', iso);
+  // NO MOUSELOCK IN ISOMETRIC. There is nothing to mouselook at from a fixed overhead camera, and a
+  // captured pointer eats the drag-to-rotate gesture and every click on the page's own controls.
+  // Released on the way in, not just refused: switching to iso while the lock is already held would
+  // otherwise leave it captured until Escape.
+  controls.pointerLockAllowed = !iso;
+  if (iso) controls.releasePointer();
 }
 
 function status(msg: string) {
@@ -112,8 +126,163 @@ function status(msg: string) {
 }
 
 const viewer = new Viewer(canvas);
+
+// THE CUT PLANE: CAST BY DEFAULT, OVERRIDABLE BY HAND, ALWAYS SHOWING ITS NUMBER.
+//
+// In AUTO the value comes from a ray walked from the character towards the camera, horizontally, and
+// the plane lands just beyond the first wall -- so the wall blocking the view is cut and nothing
+// behind it is. The slider tracks that value live so it can be watched while walking and turning.
+//
+// Dragging takes over and pins it; "auto" hands it back to the cast. Both states show the number,
+// which is the point: you can see what the cast thinks even while overriding it.
+/** Box mode's default half-extent: 4 is the 8x8 the user asked for. Mirrors BOX_HALF in viewer.ts. */
+const BOX_DEFAULT = 4;
+
+const revealTuner = (() => {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:50;background:rgba(0,0,0,.6);'
+    + 'color:#eee;font:12px system-ui,sans-serif;padding:6px 8px;border-radius:4px;'
+    + 'display:flex;gap:8px;align-items:center;pointer-events:auto';
+  const label = document.createElement('span');
+  label.style.minWidth = '150px';
+  const input = document.createElement('input');
+  input.type = 'range';
+  // A BIAS, centred on zero: the cast already tracks the room as you walk and turn, so the useful
+  // control is "a bit more / a bit less than that", not a fixed number that is right in one spot.
+  input.min = '-8';
+  input.max = '8';
+  input.step = '0.25';
+  input.value = '0';
+  input.style.width = '150px';
+  const reset = document.createElement('button');
+  reset.textContent = '0';
+  reset.title = 'back to exactly what the cast says';
+  reset.style.cssText = 'font:11px system-ui;padding:2px 6px;cursor:pointer';
+
+  // THE OTHER REVEAL, and the reason it is a button rather than a replacement: the two answer the
+  // same question differently enough that neither is obviously right everywhere. `cutaway` is the
+  // depth plane this whole box tunes; `room` finds the room by flood fill and hides its lid and
+  // near walls, with no plane, no disc and nothing that can cut through into the void. Everything
+  // else in this box is plane machinery, so it goes away in room mode rather than sitting there
+  // showing numbers that decide nothing.
+  // THREE ANSWERS TO THE SAME QUESTION, none of them obviously right everywhere, so the button
+  // cycles rather than replacing:
+  //   cutaway  the depth plane this box tunes. Reveals reliably; can tunnel into the void,
+  //            because a plane has no far side.
+  //   room     the flood fill: the room you are in, its lid and its near walls. Cannot show the
+  //            void at all; shows less when the shape it finds is not the shape you meant.
+  //   box      an 8x8 box of world around the character, and everything in it goes. No camera
+  //            term, so nothing is a function of where you are looking; what it exposes is
+  //            bounded by the box rather than by tuning.
+  const MODES = ['cutaway', 'room', 'box'] as const;
+  const TITLES: Record<typeof MODES[number], string> = {
+    cutaway: 'Depth cutaway, tuned by the slider. Click for the room reveal.',
+    room: 'Room reveal: the room you are in, found by flood fill. Click for the 8x8 box.',
+    box: 'Box: an 8x8 box around you, no camera term. Slider sets its size. Click for the cutaway.',
+  };
+  let mode: typeof MODES[number] = 'cutaway';
+  const modeBtn = document.createElement('button');
+  modeBtn.style.cssText = 'font:11px system-ui;padding:2px 6px;cursor:pointer';
+  const renderMode = () => {
+    modeBtn.textContent = mode;
+    modeBtn.title = TITLES[mode];
+    // The slider means a different thing per mode, so it is shown only where it means something:
+    // a bias on the cut plane in cutaway, the box's size in box, nothing at all in room.
+    const tunable = mode !== 'room';
+    label.hidden = !tunable;
+    input.hidden = !tunable;
+    reset.hidden = !tunable;
+    if (mode === 'box') {
+      input.min = '2'; input.max = '24'; input.step = '1'; input.value = String(BOX_DEFAULT);
+      label.textContent = `box ${BOX_DEFAULT * 2}x${BOX_DEFAULT * 2}`;
+      viewer.setBoxHalf(BOX_DEFAULT);
+    } else {
+      input.min = '-8'; input.max = '8'; input.step = '0.25'; input.value = '0';
+      viewer.setCutBias(0);
+    }
+  };
+  // THE SEARCH, AS A SWITCH. It is a judgement about what looks right sitting on top of a
+  // measurement, and when the two disagree you have to be able to see which is which.
+  let tune = true;
+  const tuneBtn = document.createElement('button');
+  tuneBtn.style.cssText = 'font:11px system-ui;padding:2px 6px;cursor:pointer';
+  const renderTune = () => {
+    tuneBtn.textContent = tune ? 'auto' : 'wall';
+    tuneBtn.title = tune
+      ? 'The plane is chosen to minimise floaters. Click to use the plain wall distance instead.'
+      : 'The plane is the wall distance plus bias. Click to let the floater search choose it.';
+    tuneBtn.hidden = mode !== 'cutaway';
+  };
+  tuneBtn.addEventListener('click', () => {
+    tune = !tune;
+    viewer.setAutoTune(tune);
+    renderTune();
+  });
+
+  modeBtn.addEventListener('click', () => {
+    mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length]!;
+    viewer.setRevealMode(mode);
+    renderMode();
+    renderTune();
+  });
+  renderMode();
+  renderTune();
+
+  input.addEventListener('input', () => {
+    const v = Number(input.value);
+    if (mode === 'box') {
+      viewer.setBoxHalf(v);
+      label.textContent = `box ${v * 2}x${v * 2}`;
+    } else {
+      viewer.setCutBias(v);
+    }
+  });
+  reset.addEventListener('click', () => {
+    if (mode === 'box') {
+      input.value = String(BOX_DEFAULT);
+      viewer.setBoxHalf(BOX_DEFAULT);
+      label.textContent = `box ${BOX_DEFAULT * 2}x${BOX_DEFAULT * 2}`;
+    } else {
+      input.value = '0';
+      viewer.setCutBias(0);
+    }
+  });
+  for (const ev of ['pointerdown', 'pointermove', 'wheel']) {
+    wrap.addEventListener(ev, (e) => e.stopPropagation());
+  }
+  // Polled rather than pushed: the cast changes whenever the character moves or the camera turns,
+  // and a readout that only updated on drag would show a stale number exactly when it matters.
+  setInterval(() => {
+    if (mode !== 'cutaway') return;
+    const { blocks, wall, std, nudge, hit, ray, tuned, score } = viewer.cutBiasState();
+    const sign = nudge > 0 ? '+' : '';
+    // Every term shown separately: what the rays measured, the standing bias baked into the cast,
+    // and your own nudge. Folding the standing bias into "cast" hid it, which is exactly how a
+    // constant becomes invisible and then inexplicable.
+    // The SCORE is the number worth watching: it is how many of the nine rays would end buried in
+    // rock at this plane, i.e. how many floaters you are about to see. 0 is a clean cut.
+    const scored = tuned && score !== null ? ` [floaters ${score}]` : '';
+    label.textContent = hit
+      ? `cut ${blocks.toFixed(1)} = wall ${wall.toFixed(1)} +${std} ${sign}${nudge.toFixed(1)}`
+        + ` (ray ${ray.toFixed(1)})${scored}`
+      : `cut ${blocks.toFixed(1)} (NO HIT, ${sign}${nudge.toFixed(1)})${scored}`;
+    reset.disabled = nudge === 0;
+  }, 100);
+
+  wrap.append(modeBtn, tuneBtn, label, input, reset);
+  document.body.appendChild(wrap);
+  return { wrap, input };
+})();
+void revealTuner;
 const controls = new FlyControls(viewer.camera, canvas);
 const world = new World();
+// The isometric cutaway needs to know which blocks a sightline passes through, and that is
+// the same table the walking rules already keep: `air` is the class with no substance —
+// torches, carpets, rails — while glass and leaves are solid enough to be a ceiling. Built
+// ONCE, because `navWorld` carries a per-state-id cache and rebuilding it per lookup would
+// turn each of the ceiling scan's thousands of probes into a string split.
+const revealNav = navWorld(world);
+viewer.setCeilingSource((x, y, z) => revealNav.classify(x, y, z) === 'air');
 let ctx: MeshContext | null = null;
 let stack: PackStack | null = null;
 /**
@@ -138,6 +307,8 @@ let bakeRefresh: BakeRefresh | null = null;
  * everything downstream checks `shaders?.active`, so a failure anywhere leaves the
  * ordinary three.js renderer on screen rather than a black page.
  */
+/** The pack a bare `?shaders` means. `shader-toggle` has to agree with this or the button lies. */
+const DEFAULT_SHADERPACK = 'sildurs-lite';
 let shaders: ShaderView | null = null;
 let shaderBundle: import('../shaders/bundle.js').ShaderBundle | null = null;
 
@@ -158,9 +329,15 @@ const streamParam = parseStreamParam(new URLSearchParams(location.search).get('s
  * viewer working.
  */
 async function startShaders(): Promise<void> {
+  // THE SELECTOR COMES UP EITHER WAY, before the early return below. It is how you turn
+  // shaders ON, so gating it on shaders already being on would leave it unreachable from a
+  // cold page — which is exactly the state this control was added to fix.
+  const toggle = new ShaderToggle({ root: document.body, fallbackId: DEFAULT_SHADERPACK });
+  void fetchPacks().then((packs) => toggle.setPacks(packs));
+
   const want = new URLSearchParams(location.search).get('shaders');
   if (want === null) return;
-  const id = want || 'sildurs-lite';
+  const id = want || DEFAULT_SHADERPACK;
   status(`loading shaderpack ${id}...`);
   shaderBundle = await ShaderView.fetchBundle(id);
   if (!shaderBundle) {
@@ -184,6 +361,16 @@ const diag = {
   packs: 0,
   chunks: 0,
   sections: 0,
+  /**
+   * Resident section geometry, in MB, and how many sections have been disposed this session.
+   *
+   * ON THE HUD ON PURPOSE. The crash this pair exists to make visible was invisible until
+   * the tab died: a section count and a triangle count both looked healthy while 883 MB of
+   * attribute arrays piled up behind them. A number that is meant to sit still is worth
+   * more on screen than one that is meant to go up.
+   */
+  geomMB: 0,
+  dropped: 0,
   meshMs: 0,
   atlasSprites: 0,
   atlasMissing: 0,
@@ -328,7 +515,9 @@ const pending: MeshJob[] = [];
 const pendingKeys = new Set<string>();
 /** set when jobs were pushed out of order; sorted once, at the next pump */
 let pendingUnsorted = false;
-let queueBuiltFor = { x: Infinity, z: Infinity };
+let queueBuiltFor: { x: number; z: number; forward: readonly [number, number, number] } = {
+  x: Infinity, z: Infinity, forward: [0, 0, -1],
+};
 const MESH_BUDGET_MS = 8;
 /**
  * While sections THIS close to the camera are still waiting, the budget triples. The
@@ -349,6 +538,13 @@ const MESH_RADIUS = 256;
  */
 const BURIED_PENALTY = 400 * 400;
 
+/** The view the queue was built against; the mesh cone is judged from this, not per job. */
+let meshView: ViewPoint | null = null;
+
+function sectionCentreOf(cx: number, cy: number, cz: number): [number, number, number] {
+  return [cx * 16 + 8, cy * 16 + 8, cz * 16 + 8];
+}
+
 function sectionD2(cx: number, cy: number, cz: number): number {
   const cam = viewer.camera.position;
   const dx = cx * 16 + 8 - cam.x;
@@ -368,12 +564,13 @@ function pushJob(cx: number, cy: number, cz: number, d2: number): void {
 function rebuildQueue() {
   if (!ctx) return;
   const cam = viewer.camera.position;
+  meshView = viewer.viewPoint();
   pending.length = 0;
   pendingKeys.clear();
   for (const col of world.chunks.values()) enqueueColumn(col, false);
   pending.sort((a, b) => b.d2 - a.d2); // pop() takes the nearest
   pendingUnsorted = false;
-  queueBuiltFor = { x: cam.x, z: cam.z };
+  queueBuiltFor = { x: cam.x, z: cam.z, forward: meshView.forward };
   // The camera has moved: sections it left far behind are disposed, and will be re-queued
   // by a later rebuild if it comes back within MESH_RADIUS of them.
   viewer.dropSectionsBeyond(UNLOAD_DISTANCE);
@@ -389,24 +586,34 @@ function rebuildQueue() {
  * faces toward it were left uncovered and lit as open sky; a column arriving at the edge
  * of the load radius would otherwise leave a bright seam that never heals.
  */
+function requeueNeighbours(cx: number, sy: number, cz: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (!dx && !dz) continue;
+      const nx = cx + dx;
+      const nz = cz + dz;
+      if (viewer.hasSection(`${nx},${sy},${nz}`)) pushJob(nx, sy, nz, sectionD2(nx, sy, nz));
+    }
+  }
+}
+
 function enqueueColumn(col: ChunkColumn, withNeighbours: boolean): void {
   const r2 = MESH_RADIUS * MESH_RADIUS;
   const top = topSection(col);
   const camY = viewer.camera.position.y;
+  const view = meshView ?? viewer.viewPoint();
   for (const sy of col.sections.keys()) {
     const d2 = sectionD2(col.x, sy, col.z);
     if (d2 > r2) continue;
+    // NOT MESHED IF IT WOULD NOT BE KEPT. The viewer drops sections that are far and
+    // outside the view cone (section-budget.ts); queueing them anyway would spend the mesh
+    // budget building geometry that `retain` disposes on the next frame, for ever. The
+    // mesh cone is deliberately narrower than the keep cone so the two never disagree
+    // about a section on the boundary.
+    if (!shouldKeep(sectionCentreOf(col.x, sy, col.z), view, DEFAULT_MESH)) continue;
     const buried = sy < top - 1 && camY > (sy + 1) * 16;
     if (!viewer.hasSection(`${col.x},${sy},${col.z}`)) pushJob(col.x, sy, col.z, buried ? d2 + BURIED_PENALTY : d2);
-    if (!withNeighbours) continue;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        if (!dx && !dz) continue;
-        const nx = col.x + dx;
-        const nz = col.z + dz;
-        if (viewer.hasSection(`${nx},${sy},${nz}`)) pushJob(nx, sy, nz, sectionD2(nx, sy, nz));
-      }
-    }
+    if (withNeighbours) requeueNeighbours(col.x, sy, col.z);
   }
 }
 
@@ -433,17 +640,75 @@ function neighboursSettled(cx: number, cz: number): boolean {
   return true;
 }
 
+/**
+ * How far the camera may turn before the queue is stale, as a dot product.
+ *
+ * TURNING MOVES THE CAMERA NOT AT ALL, and since the queue now skips sections outside the
+ * mesh cone, a rebuild gated only on distance meant that spinning on the spot queued
+ * nothing and the world behind you never filled in. cos(25 deg) is a third of the way to
+ * the cone's edge: far enough not to rebuild on mouse jitter, near enough that geometry is
+ * queued well before it reaches the middle of the screen.
+ */
+const REBUILD_TURN_COS = Math.cos((25 * Math.PI) / 180);
+
 /** Follow the camera: tell the streamer, re-sort a queue pushed to out of order, rebuild a stale one. */
 function maintainQueue(): void {
   const cam = viewer.camera.position;
   streamer?.setCamera(cam.x, cam.z);
   // Re-sort when the camera has moved far enough that the ordering is stale.
   const moved = Math.hypot(cam.x - queueBuiltFor.x, cam.z - queueBuiltFor.z);
-  if (moved > 48) rebuildQueue();
+  const f = viewer.viewPoint().forward;
+  const b = queueBuiltFor.forward;
+  const turned = f[0] * b[0] + f[1] * b[1] + f[2] * b[2] < REBUILD_TURN_COS;
+  if (moved > 48 || turned) rebuildQueue();
   else if (pendingUnsorted) {
     pending.sort((a, b) => b.d2 - a.d2);
     pendingUnsorted = false;
   }
+}
+
+/**
+ * How much of the ceiling to hand back for one frame when a trade is worth making.
+ *
+ * Sized at roughly one frame of meshing (~70 sections), so the mesher is the thing that
+ * limits the rate and not this: hand back more and the extra is disposed again before it
+ * can be filled, which is churn with nothing to show for it.
+ */
+const RECYCLE_BYTES = 12 * 1024 * 1024;
+
+/** The worst-scoring resident section, from the last retain pass. See `recycleCap`. */
+let worstResident = 0;
+
+/**
+ * The byte ceiling to apply THIS frame.
+ *
+ * Normally the ceiling itself. But once the budget is full, the mesher stops and the
+ * retention pass only trims what is OVER the ceiling — so the geometry the camera first
+ * looked at owns the budget for ever and a new direction can never be built. Measured while
+ * spinning on the spot before this existed: 2328 sections resident, ZERO disposed, `queued`
+ * climbing past 3300, and the picture down to 236k triangles at the angles that were never
+ * paid for.
+ *
+ * So when the best section WAITING is clearly worth more to the picture than the worst
+ * section RESIDENT, a frame's worth of ceiling is handed back and the retention pass spends
+ * it on the worst. When nothing waiting is worth the trade — which is the resting state —
+ * the cap is untouched and nothing is disposed at all, which is what keeps this from being
+ * the "reloading these things all the fucking time" the user complained about.
+ *
+ * BURIED SECTIONS NEVER TRIGGER A TRADE. The queue sorts them last (BURIED_PENALTY) because
+ * they are underground and out of sight, but `evictionScore` only knows about distance and
+ * angle — so a section under your feet scores better than the hillside on the horizon and
+ * would evict the view to build a cave nobody can see.
+ */
+function recycleCap(): number {
+  if (viewer.sectionBytes < MAX_SECTION_BYTES) return MAX_SECTION_BYTES;
+  const next = pending[pending.length - 1];
+  if (!next || next.d2 >= BURIED_PENALTY) return MAX_SECTION_BYTES;
+  const view = meshView ?? viewer.viewPoint();
+  const centre = sectionCentreOf(next.cx, next.cy, next.cz);
+  return shouldRecycle(centre, view, DEFAULT_KEEP, worstResident)
+    ? MAX_SECTION_BYTES - RECYCLE_BYTES
+    : MAX_SECTION_BYTES;
 }
 
 function meshBudgetMs(): number {
@@ -458,7 +723,12 @@ function pumpMeshing() {
   const deadline = start + meshBudgetMs();
   const deferred: MeshJob[] = [];
   let done = 0;
-  while (pending.length && performance.now() < deadline) {
+  // STOP AT THE CEILING rather than meshing into it. `retain` disposes the worst-scoring
+  // sections the moment the resident geometry goes over MAX_SECTION_BYTES, so meshing past
+  // it would be a treadmill: build a section, have it disposed next frame, build it again.
+  // Room appears as soon as the camera turns or moves and the periphery is evicted.
+  while (pending.length && viewer.sectionBytes < MAX_SECTION_BYTES
+         && performance.now() < deadline) {
     const job = pending.pop()!;
     if (world.getChunk(job.cx, job.cz) && !neighboursSettled(job.cx, job.cz)) { deferred.push(job); continue; }
     if (meshJob(job)) done++;
@@ -490,7 +760,10 @@ function meshJob(job: MeshJob): boolean {
   if (mesh) {
     viewer.addSection(mesh);
     shaders?.addSection(mesh);
-    diag.sections++;
+    // The LIVE count, not a tally of every mesh ever built. `diag.sections++` reached 10543
+    // on a page holding 4000, which is a HUD reading "sections" that only ever climbs — and
+    // it climbed in lockstep with the real leak, so it read as confirmation of it.
+    diag.sections = viewer.sectionCount;
   }
   return true;
 }
@@ -623,7 +896,12 @@ function renderExtractedModels(atlas: TextureAtlas): number {
   for (const ent of pendingEntities) {
     const id = (ent.id as string) ?? '';
     if (classifyEntity(id, models) !== 'extracted-model') continue;
-    const mesh = cachedEntityMesh(meshes, models, id, atlas);
+    // BY APPEARANCE, NOT BY TYPE. A cache keyed on the entity type draws every sheep in the
+    // world the colour of whichever one was meshed first -- and a sheep with no wool looks
+    // exactly like a sheared sheep, which is how 28 broken sheep went unnoticed. `key` is ''
+    // for an ordinary mob, so the common case still meshes once for the whole world.
+    const appearance = appearanceOf(id, ent as Record<string, unknown>);
+    const mesh = cachedEntityMesh(meshes, models, id, atlas, appearance);
     if (!mesh) continue;
     viewer.addEntityMesh(`mob:${id}:${n}`, mesh.layers, {
       pos: entityPos(ent),
@@ -646,13 +924,15 @@ function cachedEntityMesh(
   models: EntityModelSet,
   id: string,
   atlas: TextureAtlas,
+  appearance?: EntityAppearance,
 ): EntityMesh | null {
-  const hit = cache.get(id);
+  const cacheKey = appearance?.key ? `${id}#${appearance.key}` : id;
+  const hit = cache.get(cacheKey);
   if (hit !== undefined) return hit;
-  const quads = buildEntityQuads(models, id, atlas);
+  const quads = buildEntityQuads(models, id, atlas, appearance);
   const mesh = quads ? meshEntityQuads(quads, atlas) : null;
   const usable = mesh && mesh.quadCount ? mesh : null;
-  cache.set(id, usable);
+  cache.set(cacheKey, usable);
   return usable;
 }
 
@@ -1003,6 +1283,8 @@ async function startObserving(url: string) {
   observing = true;
   // The button appears before the world finishes loading, disabled, so it does not pop
   // into the layout later under a thumb already reaching for it.
+  // Source is not resolved yet at this point, so the button shows the neutral state and is
+  // corrected the moment LiveView reports which source it settled on.
   joinButton.render(null, true);
   await autoLoad();
   live = new LiveView(url, {
@@ -1012,6 +1294,14 @@ async function startObserving(url: string) {
     getEntityModels: () => entityModels,
     getAtlas: () => ctx?.atlas ?? null,
     getStates: () => registry,
+    // The bundle's canonical state keys, for the spacetime terrain path's default
+    // recovery. `keys()` exists only on the SERVED registry (the baked bundle); a
+    // jar-backed registry resolves blockstate JSON itself and has no such list, so this
+    // hands over nothing rather than pretending.
+    bakedKeys: () => {
+      const r = registry as unknown as { keys?: () => Iterable<string> };
+      return r.keys ? r.keys() : [];
+    },
     regions: [...loadedRegions],
     regionBase: '/dev/region',
     entityRegions: [...loadedRegions],
@@ -1028,7 +1318,7 @@ async function startObserving(url: string) {
     onIngest: streamer ? (cx, cz) => streamer!.noteLoaded(cx, cz) : undefined,
   });
   live.onControlChange = (control) => {
-    joinButton.render(control, true);
+    joinButton.render(control, true, live?.sourceKind ?? 'bridge');
     renderModeButton();
   };
   await live.start();
@@ -1052,7 +1342,8 @@ function worldHud(
   shaderStats: { passesRun: number } | null,
 ): string {
   return `${stats.fps.toFixed(0)} fps | ${stats.drawCalls} draws | `
-    + `${(stats.triangles / 1000).toFixed(0)}k tris | ${diag.sections} sections | `
+    + `${(stats.triangles / 1000).toFixed(0)}k tris | ${diag.sections} sections `
+    + `(${diag.geomMB} MB) | `
     + `${diag.chunks} chunks | ${diag.packs} packs | ${diag.atlasSprites} sprites`
     + shaderHud(shaderStats)
     + (diag.entitiesDrawn ? ` | ${diag.entitiesDrawn} mobs` : '')
@@ -1113,7 +1404,15 @@ function frame() {
   // WebGPU reports validation errors asynchronously, so the panel has to be re-read
   // periodically rather than written once at startup.
   if (shaders && ++panelTick % 120 === 0) shaders.refreshPanel();
-  viewer.cullByDistance();
+  // Hide what is too far to draw, dispose what is not worth holding, and keep resident
+  // geometry under the byte ceiling. Every frame: turning changes the answer and moves the
+  // camera not at all, so gating this on camera movement (as the old dropSectionsBeyond
+  // was) left the whole policy switched off for anyone standing still.
+  const kept = viewer.retain(DEFAULT_KEEP, recycleCap());
+  worstResident = kept.worstScore;
+  diag.sections = kept.sections;
+  diag.geomMB = Math.round(kept.bytes / 1048576);
+  diag.dropped += kept.dropped;
   const stats = shaderStats ? viewer.statsOnly() : viewer.render();
   hud.textContent = worldHud(stats, shaderStats);
   requestAnimationFrame(frame);

@@ -3,24 +3,32 @@
  *
  * WHY THIS EXISTS. Click-to-move used to be steering: face the point, hold forward, jump
  * every 600 ms if nothing was happening, abandon the walk after four seconds of no
- * progress. That is honest about what the bridge offers — its vocabulary is
- * `move forward|back|left|right` plus `turn`, and there is no goto in it — but it means the
- * character walks into the first tree it meets and stands there shoving until the timer
- * runs out. Watching it snag on terrain is what prompted this.
+ * progress. That meant the character walked into the first tree it met and stood there
+ * shoving until the timer ran out. Watching it snag on terrain is what prompted this.
  *
- * WHY IT IS PLANNED HERE AND NOT ON THE BRIDGE. The viewer already holds the data: it
- * renders the chunks, so it knows what is solid, what is air and where the ground is. A
- * `goto` verb on the bridge would need the server's own pathfinder (which the fake-player
- * mod does not expose), a new protocol message, and a second place that can be wrong about
- * where the character is. The plan is made here and fed to the SAME steering that already
- * worked — one waypoint at a time — so nothing downstream changes.
+ * WHY IT IS PLANNED HERE AND NOT ON THE SERVER. Asked directly, on 2026-09-11: the live
+ * server's full `/help` dump has no path, goto or navigate verb in it, from vanilla or
+ * from any of its 130 mods, and the one bot mod installed (SiliconeDolls) offers exactly
+ * `spawn|kill|<action>|sneak|unsneak|sprint|unsprint|mount|dismount|look|turn|dropStack|
+ * move|hotbar|shadow|stop`. There is nothing to call. Deeper than the command list:
+ * `PathNavigation` in Minecraft belongs to `Mob`, and a `ServerPlayer` is not a `Mob` and
+ * has no navigator at all — so there is no server-side player pathfinder to expose even
+ * with a new mod, only one that could be built. See the note at the head of iso-view.ts.
+ *
+ * WHAT IS NATIVE IS THE MOVEMENT. The route is executed by `PredictedBody`, which runs the
+ * game's own extracted constants against the game's own per-state `VoxelShape` collision
+ * (see predict.ts and physics.ts). So this file does not decide how far a jump goes or how
+ * fast a body falls — it ASKS, via `jumpSpan` below, and refuses to plan any move the
+ * simulation could not actually perform. Planner and executor cannot disagree, because
+ * they read the same numbers.
  *
  * WHAT IT MODELS. A player, not a point:
  *
  *   - the body is 2 blocks tall, so a cell needs air at the feet AND at head height
  *   - it can step UP one block, and only if there is headroom above where it is standing
  *   - it can drop `maxFall` blocks, and only down a column that is actually clear
- *   - it cannot jump a gap. A one-block hole in a walkway is a wall to this planner
+ *   - it can JUMP a gap, and SPRINT-jump a wider one, as far as the game's constants say
+ *     the body really travels and not one block further
  *   - it will not stand in water, lava, fire or a cactus, and will not walk into them
  *
  * A move that is not generated is a route that cannot be planned, which is how "refuse a
@@ -35,6 +43,8 @@
  * trade, taken deliberately: a bounded search that makes progress beats an unbounded one
  * that drops a frame.
  */
+
+import { FALLBACK_MOTION, SEED_SPEED, type MotionConstants } from './physics.js';
 
 /**
  * How a block behaves for something walking on it.
@@ -66,6 +76,22 @@ export interface NavWorld {
 
 export type Cell = [number, number, number];
 
+/**
+ * How the body gets from the previous waypoint to this one.
+ *
+ * The follower needs this and cannot re-derive it: `smoothPath` collapses a run of walking
+ * cells into one long leg, so "is there a gap in the middle of this leg" is a question the
+ * straightened route no longer answers. A jump is never collapsed into a leg (see
+ * `walkableLine`, which has no jump in it), so a waypoint that says `jump` is a waypoint
+ * whose ENTIRE leg is that one jump — which is what makes the take-off point knowable.
+ */
+export type MoveKind = 'walk' | 'jump' | 'sprint';
+
+export interface Step {
+  readonly cell: Cell;
+  readonly move: MoveKind;
+}
+
 export interface PathLimits {
   /** total node expansions before the search gives up */
   maxNodes: number;
@@ -73,6 +99,26 @@ export interface PathLimits {
   maxRadius: number;
   /** how far the character may drop in one move */
   maxFall: number;
+  /**
+   * The game's own motion constants. Jump reach is DERIVED from these — see `jumpSpan`.
+   *
+   * Defaulted to the fallbacks so a planner built before physics.json lands still works;
+   * the fallbacks are the same pre-extraction guesses the predictor uses, so the two are
+   * never modelling different bodies.
+   */
+  motion: MotionConstants;
+  /** Base walking speed, blocks/s, as the predictor measures it. */
+  walkSpeed: number;
+  /**
+   * Furthest a jump edge may reach, in cells, measured centre to centre.
+   *
+   * A bound on the SEARCH, not on the physics: every candidate is still checked against
+   * `jumpSpan`, so raising this cannot produce a jump the body could not make — it only
+   * costs node expansions. 0 disables jumping entirely.
+   */
+  maxJumpCells: number;
+  /** May a sprint run-up be planned? Off means only standing-speed jumps are considered. */
+  sprint: boolean;
 }
 
 export const DEFAULT_LIMITS: PathLimits = {
@@ -80,10 +126,17 @@ export const DEFAULT_LIMITS: PathLimits = {
   // frames it is never felt. It covers a 60-block detour around a building comfortably.
   maxNodes: 6000,
   maxRadius: 64,
-  // Vanilla starts hurting past three. The character is not ours to damage on a walk it
-  // was not asked to make, and a four-block drop is usually a route that should have
-  // gone round.
+  // Vanilla starts hurting past three — fall damage is (distance - 3) hearts — so three is
+  // exactly the largest drop that costs the character nothing. The character is not ours to
+  // damage on a walk it was not asked to make.
   maxFall: 3,
+  motion: FALLBACK_MOTION,
+  walkSpeed: SEED_SPEED,
+  // A sprint jump carries about 3 blocks on these constants, so 4 is one cell past anything
+  // that can ever be accepted: enough head-room that the physics is what refuses a jump,
+  // never this number.
+  maxJumpCells: 4,
+  sprint: true,
 };
 
 export type PlanState = 'searching' | 'found' | 'unreachable';
@@ -97,6 +150,50 @@ const DIAGONAL = Math.SQRT2;
  */
 const STEP_UP_COST = 0.6;
 const FALL_COST = 0.4;
+/**
+ * What a jump costs ON TOP of the ground it covers.
+ *
+ * Jumping is the riskiest thing this planner will order — it is the one move where being
+ * slightly wrong puts the character in a hole rather than against a wall — so a route that
+ * walks round is preferred to one that hops across whenever walking round is not absurdly
+ * longer. The sprint surcharge is on top again: a standing jump is the more controlled of
+ * the two, so it wins ties.
+ *
+ * These must stay non-negative for A* to keep returning the cheapest route: every edge
+ * already costs at least the horizontal distance the heuristic credits it with, and a
+ * surcharge only ever adds.
+ */
+const JUMP_COST = 3;
+const SPRINT_JUMP_COST = 5;
+/**
+ * How far short of the landing cell's CENTRE the body may come down and still count.
+ *
+ * The body is 0.6 wide, so it is still supported while its centre is within 0.8 of the cell
+ * centre — 0.5 of cell plus 0.3 of half-width. Anything under 0.8 therefore LANDS; the
+ * question this number really answers is how much of that 0.8 is kept back as margin.
+ *
+ * It was 0.4, which keeps back half, and the live world showed that is not enough. The
+ * ground east of the base is a walkway with a one-block shaft cut through it and the far
+ * side a block lower — real geometry, correctly rendered, not a stale chunk — and the
+ * planner crossed it with a WALKING jump whose reach exceeded what it needed by 0.09 of a
+ * block. Nothing is wrong with that arithmetic and the simulation makes the jump every time
+ * in isolation. It is still the wrong answer, because a jump is the one move here whose
+ * failure is not recoverable: miss a walkway by a hand's breadth in a mining base and the
+ * character is twenty blocks down a shaft, which is precisely the "it keeps falling into
+ * holes" this work started from. Every other mistake this planner can make costs a detour.
+ *
+ * At 0.15 the body must clear all but a sixth of the way to the middle of the block it is
+ * aiming at, which keeps back 0.65 of the 0.8 for the things the plan cannot see: a frame
+ * that took 50 ms instead of 16, the reconciliation nudging the body while it is in the
+ * air, a take-off a few centimetres early. The marginal jumps this now refuses become a
+ * SPRINT jump (which has the reach to spare) or a detour or an honest "no path" — all three
+ * of which are recoverable, and none of which end at the bottom of a shaft.
+ *
+ * Pinned by a test that runs the REAL `PredictedBody` across the widest jump this planner
+ * will issue and asserts it lands on its feet. If this number is ever wrong, that test is
+ * what says so.
+ */
+const JUMP_LANDING_MARGIN = 0.15;
 /** A partial path is only worth walking if it gets this much closer to the goal. */
 const PARTIAL_MIN_GAIN = 3;
 
@@ -104,6 +201,50 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number, boolean]> = [
   [1, 0, false], [-1, 0, false], [0, 1, false], [0, -1, false],
   [1, 1, true], [1, -1, true], [-1, 1, true], [-1, -1, true],
 ];
+
+/**
+ * Jumps are CARDINAL only.
+ *
+ * Same reason diagonals stay level: a diagonal jump is a corner case with no agreed-on
+ * physics and getting it wrong is a route the character cannot walk. A gap that genuinely
+ * needs crossing on the diagonal is crossed as two cardinal moves or refused.
+ */
+const JUMP_DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+];
+
+/**
+ * How far a jump actually carries the body, in blocks, on the game's own numbers.
+ *
+ * Nothing here is a parkour fact anybody remembers. The body leaves the ground at
+ * `jumpSpeed` and is pulled down at `gravity`, both extracted from the real client, so the
+ * time in the air before it is `dy` above where it started is the positive root of
+ *
+ *     -g/2 t^2 + v t - dy = 0      =>      t = (v + sqrt(v^2 - 2 g dy)) / g
+ *
+ * and the ground covered is the horizontal speed times that. A jump UP has less time and
+ * therefore less reach; a jump DOWN has more. `PredictedBody` integrates exactly these
+ * constants, which is why the planner and the thing that executes the plan cannot disagree
+ * about what is jumpable.
+ *
+ * Returns 0 when the body cannot rise `dy` at all, which is the honest answer for a ledge
+ * higher than a jump: there is no such move.
+ */
+export function jumpSpan(
+  motion: MotionConstants,
+  walkSpeed: number,
+  sprint: boolean,
+  dy: number,
+): number {
+  const v = motion.jumpSpeed;
+  const g = motion.gravity;
+  if (!(g > 0) || !(v > 0)) return 0;
+  const disc = v * v - 2 * g * dy;
+  if (disc < 0) return 0;
+  const airtime = (v + Math.sqrt(disc)) / g;
+  const speed = walkSpeed * (sprint ? motion.sprintMultiplier : 1);
+  return speed * airtime;
+}
 
 /**
  * One bounded, resumable A* search.
@@ -114,15 +255,17 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number, boolean]> = [
  */
 export class PathPlanner {
   readonly limits: PathLimits;
-  /** Cells from the start (exclusive) to the destination. Empty until the search ends. */
-  path: Cell[] = [];
-  /** True when `path` ends short of the goal because the budget ran out. */
+  /** Steps from the start (exclusive) to the destination. Empty until the search ends. */
+  path: Step[] = [];
+  /** True when `path` stops short of the goal because the budget ran out. */
   partial = false;
   /** Node expansions used so far, for the HUD and the tests. */
   expanded = 0;
 
   private open = new Heap();
   private came = new Map<number, number>();
+  /** How the body arrived at each cell — carried into the path so the follower knows. */
+  private via = new Map<number, MoveKind>();
   private gScore = new Map<number, number>();
   private cells = new Map<number, Cell>();
   private best = { key: -1, h: Infinity };
@@ -187,6 +330,15 @@ export class PathPlanner {
    * the caller must NOT move. "Give up honestly" is the requirement; a bot that walks
    * three blocks in the wrong direction because the search fizzled is the old behaviour
    * wearing a new coat.
+   *
+   * THE ONE THING A PARTIAL PATH CANNOT PROMISE is that its endpoint has a way back. Every
+   * cell on it is reachable and no drop on it is further than `maxFall` — so it can never
+   * hurt the character — but a descent into a one-way pocket is a place the next search
+   * will honestly report as having no route onward, with the character at the bottom of it.
+   * Ruling that out means a second search from every candidate endpoint, which costs more
+   * than the bounded search this is the cheap alternative to. The trade is taken knowingly:
+   * the failure is visible ("no path" on the HUD), bounded (three blocks, no damage) and
+   * needs terrain that is a one-way drop with no route on, which is rare in a built world.
    */
   private finish(_budgetRanOut: boolean): PlanState {
     const gain = heuristic(this.start, this.goal) - this.best.h;
@@ -205,30 +357,51 @@ export class PathPlanner {
     const g = this.gScore.get(key)!;
     for (const [dx, dz, diagonal] of NEIGHBOURS) {
       const move = this.move(cell, dx, dz, diagonal);
-      if (!move) continue;
-      const [next, cost] = move;
-      const nk = this.key(next);
-      const ng = g + cost;
-      const known = this.gScore.get(nk);
-      if (known !== undefined && known <= ng) continue;
-      this.cells.set(nk, next);
-      this.gScore.set(nk, ng);
-      this.came.set(nk, key);
-      const h = heuristic(next, this.goal);
-      if (h < this.best.h) this.best = { key: nk, h };
-      this.open.push(nk, ng + h);
+      if (move) this.offer(key, g, move);
+    }
+    // Headroom to jump AT ALL is a property of where the body is standing, not of where it
+    // is going, so it is asked once rather than once per candidate: the body rises about a
+    // block, and a ceiling it would clip means there is no jump from here in any direction.
+    if (this.limits.maxJumpCells < 2) return;
+    if (this.world.classify(cell[0], cell[1] + 2, cell[2]) !== 'air') return;
+    for (const [dx, dz] of JUMP_DIRECTIONS) {
+      // Somewhere to stand in the very next cell means a WALKING edge already covers this
+      // direction, and every jump over it would be a dearer way to do the same thing. Also
+      // asked once per direction rather than once per distance — it is the same cell — which
+      // is what keeps the jump search from tripling the cost of an ordinary open-ground node.
+      if (this.standableNear(cell[0] + dx, cell[1], cell[2] + dz)) continue;
+      for (let d = 2; d <= this.limits.maxJumpCells; d++) {
+        const jump = this.jump(cell, dx * d, dz * d, d);
+        if (jump) this.offer(key, g, jump);
+      }
     }
   }
 
+  /** Relax one edge. Shared by walking and jumping so they cannot book-keep differently. */
+  private offer(key: number, g: number, edge: Edge): void {
+    const [next, cost, kind] = edge;
+    const nk = this.key(next);
+    const ng = g + cost;
+    const known = this.gScore.get(nk);
+    if (known !== undefined && known <= ng) return;
+    this.cells.set(nk, next);
+    this.gScore.set(nk, ng);
+    this.came.set(nk, key);
+    this.via.set(nk, kind);
+    const h = heuristic(next, this.goal);
+    if (h < this.best.h) this.best = { key: nk, h };
+    this.open.push(nk, ng + h);
+  }
+
   /**
-   * One move, or null if a player could not make it.
+   * One walking move, or null if a player could not make it.
    *
    * The height search runs downwards from a step up, so the FIRST landing found is the
    * highest one — which is what walking off a ledge does. Searching upwards would let a
    * route drop three blocks into a pit that has a floor at the bottom when it could have
    * walked across the top.
    */
-  private move(from: Cell, dx: number, dz: number, diagonal: boolean): [Cell, number] | null {
+  private move(from: Cell, dx: number, dz: number, diagonal: boolean): Edge | null {
     const [x, y, z] = from;
     const nx = x + dx;
     const nz = z + dz;
@@ -241,7 +414,87 @@ export class PathPlanner {
     // Diagonals stay level. A diagonal step up or down is a corner case with no agreed-on
     // physics, and getting it wrong is a route the character cannot walk.
     if (ny === null || (diagonal && ny !== y)) return null;
-    return [[nx, ny, nz], stepCost(diagonal, y, ny)];
+    return [[nx, ny, nz], stepCost(diagonal, y, ny), 'walk'];
+  }
+
+  /**
+   * One jump across a gap, or null if the body could not make it.
+   *
+   * FOUR THINGS HAVE TO HOLD, and each of them is a way the old "there is no jump move"
+   * planner was at least honest:
+   *
+   *   1. it is really a gap, and there is room to jump at all — both established by the
+   *      caller, once per direction rather than once per distance; see `expand`
+   *   2. the body fits the whole way — every cell in between is clear at body height AND
+   *      one block above it, because a jump rises about a block and a ceiling it clips is a
+   *      jump that lands in the gap
+   *   3. there is something to land on, within a step up or a safe drop
+   *   4. the game's own constants say the body travels far enough to get there — see
+   *      `jumpSpan`. This is the check that makes "it should sprint-jump the wide ones"
+   *      true without anybody typing in how wide a sprint jump is.
+   */
+  private jump(from: Cell, dx: number, dz: number, cells: number): Edge | null {
+    const [x, y, z] = from;
+    const nx = x + dx;
+    const nz = z + dz;
+    if (this.outOfRange(nx, nz)) return null;
+    const stepX = Math.sign(dx);
+    const stepZ = Math.sign(dz);
+    const ny = this.jumpLanding(nx, nz, y);
+    if (ny === null) return null;
+    if (!this.flightClear([x, y, z], [stepX, stepZ], cells, ny)) return null;
+    const needed = cells - JUMP_LANDING_MARGIN;
+    const m = this.limits;
+    if (jumpSpan(m.motion, m.walkSpeed, false, ny - y) >= needed) {
+      return [[nx, ny, nz], cells + JUMP_COST, 'jump'];
+    }
+    if (m.sprint && jumpSpan(m.motion, m.walkSpeed, true, ny - y) >= needed) {
+      return [[nx, ny, nz], cells + SPRINT_JUMP_COST, 'sprint'];
+    }
+    return null;
+  }
+
+  /**
+   * Is every cell between take-off and landing clear of the body, and of its head?
+   *
+   * Checked at the HIGHER of the two ends plus one, because the body rises about a block
+   * during a jump and a route that clips a ceiling comes down in the gap. Conservative on
+   * purpose: it refuses a jump through a two-block-high tunnel that would in fact fit,
+   * which costs a detour, where the other direction costs a character in a hole.
+   */
+  private flightClear(
+    from: Cell,
+    dir: readonly [number, number],
+    cells: number,
+    ny: number,
+  ): boolean {
+    const over = Math.max(from[1], ny);
+    for (let i = 1; i < cells; i++) {
+      const cx = from[0] + dir[0] * i;
+      const cz = from[2] + dir[1] * i;
+      if (!this.bodyClear(cx, over, cz)) return false;
+      if (this.world.classify(cx, over + 2, cz) !== 'air') return false;
+    }
+    return true;
+  }
+
+  /**
+   * Where a jump lands, searched downwards from one block up.
+   *
+   * Downwards for the same reason walking searches downwards: the first landing found is
+   * the highest one, and a jump that could come down on a ledge must not be planned to
+   * carry on past it into the pit underneath.
+   */
+  private jumpLanding(nx: number, nz: number, y: number): number | null {
+    for (let ny = y + 1; ny >= y - this.limits.maxFall; ny--) {
+      if (this.standable(nx, ny, nz)) return ny;
+    }
+    return null;
+  }
+
+  /** Is there anywhere to stand in this column, within a step up or a safe drop? */
+  private standableNear(x: number, y: number, z: number): boolean {
+    return groundWithin(this.world, x, y, z, this.limits.maxFall);
   }
 
   private outOfRange(nx: number, nz: number): boolean {
@@ -272,11 +525,11 @@ export class PathPlanner {
     return bodyClear(this.world, x, y, z);
   }
 
-  private rebuild(key: number): Cell[] {
-    const out: Cell[] = [];
+  private rebuild(key: number): Step[] {
+    const out: Step[] = [];
     let k: number | undefined = key;
     while (k !== undefined && k !== this.key(this.start)) {
-      out.push(this.cells.get(k)!);
+      out.push({ cell: this.cells.get(k)!, move: this.via.get(k) ?? 'walk' });
       k = this.came.get(k);
     }
     return out.reverse();
@@ -297,6 +550,9 @@ export class PathPlanner {
   }
 }
 
+/** A candidate move: where it lands, what it costs, and how the body gets there. */
+type Edge = [Cell, number, MoveKind];
+
 /** What one step costs: distance, plus a nudge away from routes that go up and down. */
 function stepCost(diagonal: boolean, from: number, to: number): number {
   return (diagonal ? DIAGONAL : STEP)
@@ -311,6 +567,10 @@ function stepCost(diagonal: boolean, from: number, to: number): number {
  * is a step, a drop of up to `maxFall` is a step down, anything else stops it. Diagonal
  * transitions need both orthogonal neighbours open, exactly as the search does, so a line
  * cannot squeeze through a corner the route was not allowed through.
+ *
+ * THERE IS NO JUMP IN HERE, deliberately, and that is what stops `smoothPath` swallowing
+ * one: a leg that crosses a gap is not walkable, so the straightener cannot merge across
+ * it and every jump survives into the route as a leg of its own.
  */
 export function walkableLine(
   world: NavWorld,
@@ -358,26 +618,30 @@ function lineStep(
  * overshot each one. Collapsing the route to the furthest cell still reachable in a
  * straight walk turns that into two or three long legs.
  *
+ * A merged leg is by construction a plain WALK — `walkableLine` proved it — so the merged
+ * waypoint is re-labelled as one. A leg that could not be merged keeps whatever the search
+ * said it was, which is how a jump keeps its label all the way to the follower.
+ *
  * The lookahead is capped so this stays linear-ish: the search can return a hundred cells
  * and checking every pair would cost more than the search did.
  */
 export function smoothPath(
   world: NavWorld,
   start: Cell,
-  path: readonly Cell[],
+  path: readonly Step[],
   maxFall = DEFAULT_LIMITS.maxFall,
-): Cell[] {
-  const out: Cell[] = [];
+): Step[] {
+  const out: Step[] = [];
   let anchor = start;
   let i = 0;
   while (i < path.length) {
     let best = i;
     const limit = Math.min(path.length - 1, i + SMOOTH_LOOKAHEAD);
     for (let j = limit; j > i; j--) {
-      if (walkableLine(world, anchor, path[j], maxFall)) { best = j; break; }
+      if (walkableLine(world, anchor, path[j].cell, maxFall)) { best = j; break; }
     }
-    out.push(path[best]);
-    anchor = path[best];
+    out.push(best === i ? path[i] : { cell: path[best].cell, move: 'walk' });
+    anchor = path[best].cell;
     i = best + 1;
   }
   return out;
@@ -416,6 +680,25 @@ export function standable(world: NavWorld, x: number, y: number, z: number): boo
 /** Is the 2-block body volume free at this cell? */
 export function bodyClear(world: NavWorld, x: number, y: number, z: number): boolean {
   return world.classify(x, y, z) === 'air' && world.classify(x, y + 1, z) === 'air';
+}
+
+/**
+ * Is there anywhere to stand in this column, within `maxFall` below and a step above?
+ *
+ * The follower's ledge guard asks this about the cell it is about to walk into: a column
+ * with no answer is a drop the plan did not authorise, and walking into it is the "it fell
+ * off the edge" failure. Exported because that check has to ask exactly the question the
+ * planner asked, and a second implementation of it would drift.
+ */
+export function groundWithin(
+  world: NavWorld,
+  x: number,
+  y: number,
+  z: number,
+  maxFall = DEFAULT_LIMITS.maxFall,
+): boolean {
+  for (let ny = y + 1; ny >= y - maxFall; ny--) if (standable(world, x, ny, z)) return true;
+  return false;
 }
 
 /**

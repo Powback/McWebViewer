@@ -62,12 +62,40 @@ export class ZipPack implements Pack {
  * biomes (Terralith, Incendium, Nullscape here) ship those files exactly like vanilla,
  * so honouring them costs nothing and makes modded worlds tint correctly.
  */
+/** `data/<ns>/recipe/...` exactly — see the note in `defaultFilter`. */
+export const RECIPE_PATH = /^data\/[^/]+\/recipe\//;
+
+/** `data/<ns>/tags/block/...` — needed to know which blocks a tool is for. */
+export const BLOCK_TAG_PATH = /^data\/[^/]+\/tags\/block\//;
+
+/**
+ * `data/<ns>/<something>_variant/...` — the datapack registries that decide what a mob
+ * LOOKS like. `wolf_variant` names each coat's wild / tame / angry texture; the pattern is
+ * deliberately not spelled `wolf_variant` so a mod's own variant registry is kept too.
+ */
+export const VARIANT_PATH = /^data\/[^/]+\/[a-z0-9_]*variant\//;
+
+/** The kinds of `data/` file a renderer actually needs. */
+function keptDataFile(name: string): boolean {
+  return name.includes('/worldgen/biome/')
+    || name.includes('/computercraft/turtle_upgrade/')
+    || RECIPE_PATH.test(name)
+    || BLOCK_TAG_PATH.test(name)
+    || VARIANT_PATH.test(name);
+}
+
 export function defaultFilter(name: string): boolean {
   if (name.startsWith('data/') || name.includes('/worldgen/biome/')) {
     // Turtle upgrade DEFINITIONS (`type` + `item`) are data, not assets, and decide which
     // model a turtle's pickaxe or modem is drawn with — see render/turtle-upgrades.ts.
-    return (name.includes('/worldgen/biome/') || name.includes('/computercraft/turtle_upgrade/'))
-      && name.endsWith('.json');
+    //
+    // RECIPES are kept for the same reason the biome files are: they are the mod's own data
+    // and reading them is what makes recipe support generic across all 130 mods rather than
+    // per-mod code. `data/<ns>/recipe/` only — NOT anything merely containing "recipe",
+    // because `data/<ns>/advancement/recipes/` holds the advancement that unlocks each one,
+    // which is a different file with a completely different schema and outnumbers the real
+    // recipes badly (2,774 of them turned up in a first, sloppier scan).
+    return keptDataFile(name) && name.endsWith('.json');
   }
   if (!name.startsWith('assets/')) return false;
   return (

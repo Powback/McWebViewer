@@ -46,9 +46,37 @@ function devMount(): Plugin {
         res.setHeader('content-type', name.endsWith('.png') ? 'image/png' : 'application/json');
         return createReadStream(path).pipe(res);
       });
+      // Vanilla sound files, fetched by scripts/fetch-sounds.mjs into .cache/sounds.
+      // Cached there and never redistributed, exactly like the client jar. Mounted on its
+      // own prefix — putting it inside the /dev middleware makes `req.url` relative to
+      // /dev, so every request fell through to the SPA fallback and returned index.html
+      // with a 200, which looks exactly like it worked.
+      server.middlewares.use('/sounds', (req, res, next) => {
+        if (req.method !== 'GET') return next();
+        const rel = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\//, '');
+        if (!/^[A-Za-z0-9._/-]+$/.test(rel) || rel.includes('..')) return next();
+        const path = join(process.cwd(), '.cache', 'sounds', rel);
+        if (!existsSync(path)) return next();
+        res.setHeader('content-type', rel.endsWith('.ogg') ? 'audio/ogg' : 'application/json');
+        res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        return createReadStream(path).pipe(res);
+      });
       server.middlewares.use('/dev', (req, res, next) => {
         if (req.method !== 'GET') return next();
         const url = decodeURIComponent((req.url ?? '').split('?')[0]);
+
+        // Mirrors the container's /dev/source.json so dev and prod take the same code path.
+        // Dev defaults to the bridge exactly as the container does; ?source=spacetime on the
+        // URL, or MCWV_SOURCE here, switches it.
+        if (url === '/source.json') {
+          res.setHeader('content-type', 'application/json');
+          res.setHeader('cache-control', 'no-store');
+          return res.end(JSON.stringify({
+            source: process.env.MCWV_SOURCE ?? 'bridge',
+            stdbUri: process.env.MCWV_STDB_URI ?? 'http://127.0.0.1:3200',
+            database: process.env.MCWV_STDB_DB ?? 'mcspacetime',
+          }));
+        }
 
         if (url === '/manifest.json') {
           const jars = existsSync(MODS) ? readdirSync(MODS).filter((f) => f.endsWith('.jar')) : [];

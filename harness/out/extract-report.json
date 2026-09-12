@@ -25,13 +25,12 @@
   "noLayerDefinitionByDesign": ["minecraft:item", "minecraft:item_frame", "minecraft:painting"],
   "notCovered": [],
   "failures": [
-    {"what": "scan createthrusters-bundled-V1.1.3.jar", "reason": "ZipException: zip END header not found"},
     {"what": "class:net.minecraft.client.model.geom.builders.LayerDefinition#create", "reason": "NullPointerException"},
-    {"what": "class:appeng.core.AppEngClient#lambda$registerEntityLayerDefinitions$8", "reason": "NoClassDefFoundError: net/neoforged/fml/IExtensionPoint"},
+    {"what": "class:appeng.core.AppEngClient#lambda$registerEntityLayerDefinitions$8", "reason": "NoClassDefFoundError: net/neoforged/neoforge/client/gui/ConfigurationScreen"},
     {"what": "class:io.github.foundationgames.automobility.neoforge.mixin.jsonem.LayerDefinitionAccess#automobility$create", "reason": "AssertionError"},
     {"what": "class:io.github.foundationgames.automobility.neoforge.vendored.jsonem.serialization.JsonEMCodecs#lambda$static$30", "reason": "ClassCastException: class net.minecraft.client.model.geom.builders.PartDefinition cannot be cast to class io.github.foundationgames.automobility.neoforge.mixin.jsonem.PartDefinitionAccess (net.minecraft.client.model.geom..."},
     {"what": "class:com.simibubi.create.compat.curios.CuriosRenderers#lambda$onLayerRegister$1", "reason": "NoClassDefFoundError: net/neoforged/neoforge/client/event/EntityRenderersEvent$RegisterLayerDefinitions"},
-    {"what": "class:rbasamoyai.createbigcannons.compat.curios.CBCCuriosRenderers#lambda$onLayerRegister$1", "reason": "NoClassDefFoundError: net/neoforged/bus/api/IEventBus"},
+    {"what": "class:rbasamoyai.createbigcannons.compat.curios.CBCCuriosRenderers#lambda$onLayerRegister$1", "reason": "NoClassDefFoundError: net/neoforged/neoforge/client/event/EntityRenderersEvent$RegisterLayerDefinitions"},
     {"what": "class:com.minecolonies.core.client.model.MaleDruidModel#createMesh", "reason": "IllegalAccessError: class com.minecolonies.core.client.model.MaleDruidModel tried to access private method 'void net.minecraft.resources.ResourceLocation.<init>(java.lang.String, java.lang.String)' (com.minecolonies.core..."},
     {"what": "class:com.railwayteam.railways.content.conductor.ConductorCapModel#createBodyLayer", "reason": "NoClassDefFoundError: com/tterrag/registrate/AbstractRegistrate"},
     {"what": "class:com.railwayteam.railways.content.conductor.ConductorEntityModel#createBodyLayer", "reason": "NoClassDefFoundError: Could not initialize class com.railwayteam.railways.Railways"}

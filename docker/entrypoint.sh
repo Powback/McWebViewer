@@ -65,6 +65,19 @@ printf '{"jars":%s,"regions":%s,"entityRegions":%s}\n' \
   "$(json_list "$JARS")" "$(json_list "$REGIONS")" "$(json_list "$ENTITY_REGIONS")" \
   > /srv/manifest.json
 
+# Which live pipeline the browser uses. Written from env so the toggle needs a container
+# restart at most, never a rebuild:
+#   MCWV_SOURCE     bridge (default) | spacetime
+#   MCWV_STDB_URI   SpacetimeDB base URL      (default http://mcspacetime.pow)
+#   MCWV_STDB_DB    module/database name      (default mcspacetime)
+# A single tab can still override with ?source=spacetime without touching this.
+printf '{"source":"%s","stdbUri":"%s","database":"%s"}\n' \
+  "${MCWV_SOURCE:-bridge}" \
+  "${MCWV_STDB_URI:-http://mcspacetime.pow}" \
+  "${MCWV_STDB_DB:-mcspacetime}" \
+  > /srv/source.json
+echo "mcwv: world source = ${MCWV_SOURCE:-bridge}"
+
 if [ -f /data/client/baked/assets.json ]; then
   echo "mcwv: baked assets present ($(du -h /data/client/baked/assets.json | cut -f1)) — the browser will NOT fetch jars"
 else

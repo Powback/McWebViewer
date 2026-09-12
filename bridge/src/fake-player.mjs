@@ -52,6 +52,35 @@
  * For fabric-carpet, override with MCWV_FAKEPLAYER_COMMANDS:
  *   {"moveStop":"player {name} move"}   and MCWV_HOTBAR_BASE=0
  */
+/**
+ * Smallest gap between two `tp` commands, in milliseconds.
+ *
+ * 50 ms is 20 placements a second — continuous to the eye, and the same order of traffic as
+ * the existing position poll. RCON is serialised on one connection and drained on the tick
+ * thread, so asking faster than this only queues behind itself.
+ */
+export const GOTO_MIN_MS = 50;
+
+/**
+ * How long a position may go un-re-asserted while the browser's body stands still.
+ *
+ * This used to be "forever": a repeat of the same position was skipped outright, on the
+ * reasoning that standing still should cost nothing. That is only true of a body the server
+ * agrees is standing on something. THE SERVER HAS ITS OWN GRAVITY, and it runs it at this
+ * world's tick rate — a 200/s target, about 145 in practice — so a bot the server thinks is
+ * unsupported falls seven times faster in real time than a player does. The two only have
+ * to disagree about the floor once — a resync, a teleport, a chunk that has not streamed in
+ * yet, a body that ended up inside geometry — and the skip then left the bot free-falling
+ * with nothing being sent to stop it. The browser read it lower, its reconciliation followed
+ * it down, the next teleport put the bot at the new lower place, and the pair ratcheted into
+ * the void. Measured on the live server standing perfectly still: y=48 to y=24 in twenty
+ * seconds, with the resync counter climbing 2 -> 8.
+ *
+ * So a repeat is still cheap — it is rate-limited exactly as a move is — but it is not free,
+ * and the position is re-asserted rather than assumed to hold.
+ */
+export const GOTO_KEEPALIVE_MS = GOTO_MIN_MS;
+
 export const DEFAULT_COMMANDS = {
   spawn: 'player {name} spawn',
   despawn: 'player {name} kill',
@@ -60,6 +89,28 @@ export const DEFAULT_COMMANDS = {
   moveLeft: 'player {name} move left',
   moveRight: 'player {name} move right',
   moveStop: 'player {name} stop',
+  /**
+   * Place the body at an exact position.
+   *
+   * THIS IS HOW MOVEMENT IS DRIVEN, and `moveForward` and friends are no longer used for
+   * it. Measured on the dev replica, where the tick rate can safely be changed:
+   *
+   *     tick rate  20 -> `move forward` for 1s travelled  4.17 blocks
+   *     tick rate 200 -> `move forward` for 1s travelled 16.70 blocks
+   *
+   * `move` is a STATEFUL, PER-TICK input: the mod applies it once per tick, so distance per
+   * real second is (per-tick step x tick rate). The live server targets 200 ticks/s and
+   * actually manages about 145 — so the character bolted across the base at roughly four
+   * times walking speed, and wobbled as the server's load changed. None of that is
+   * addressable from the client, and the tick rate is not ours to change.
+   *
+   * A teleport is a DISPLACEMENT, not an input: the entity lands exactly where it is told,
+   * so distance per real second is whatever the driver chooses. Measured on the same
+   * replica at 200 ticks/s, a tp to `36.0 + 4.317` landed at 40.317 — exact to the
+   * millimetre. The browser's local simulation, which integrates real seconds against the
+   * game's own constants, is that driver.
+   */
+  goto: 'tp {name} {x} {y} {z}',
   jump: 'player {name} jump once',
   sneakOn: 'player {name} sneak',
   sprintOn: 'player {name} sprint',
@@ -143,7 +194,8 @@ const DIRECTIONS = ['forward', 'back', 'left', 'right'];
 
 export class FakePlayer {
   #run;
-  #lastMove = '';
+  #lastGoto = '';
+  #lastGotoAt = 0;
 
   /**
    * @param {object} opts
@@ -233,9 +285,6 @@ export class FakePlayer {
     }
     this.available = true;
     this.joined = true;
-    // 'moveStop' rather than '': a first input frame with no key held is the common case
-    // (the browser sends one on focus) and must not fire a `stop` at the server.
-    this.#lastMove = 'moveStop';
     this.yaw = 0;
     this.pitch = 0;
     this.intent = { move: '', digging: false, sneak: false, sprint: false };
@@ -248,7 +297,6 @@ export class FakePlayer {
   async leave() {
     if (!this.joined) return;
     this.joined = false;
-    this.#lastMove = '';
     await this.#send(this.commands.despawn);
     this.log(`fake player: ${this.name} left`);
   }
@@ -282,19 +330,46 @@ export class FakePlayer {
    */
   async input(msg) {
     if (!this.active) return;
+    // Movement itself is NOT sent from here any more — see `goto` and the note on the
+    // `goto` command. What remains are the inputs that are genuinely momentary or stateful
+    // and not a displacement: jumping, sneaking, sprinting.
+    //
+    // The direction is still tracked so `#stopAll` can put back what a `stop` cancels, and
+    // so a deployment that opts back into command-driven movement still behaves.
     const held = DIRECTIONS.find((d) => msg[d] === true);
-    const key = held ? `move${held[0].toUpperCase()}${held.slice(1)}` : 'moveStop';
-    this.intent.move = held ? key : '';
-    if (key !== this.#lastMove) {
-      this.#lastMove = key;
-      // Stopping movement means `stop`, which also cancels digging and sneaking; put
-      // them back rather than letting a key release silently cancel a mouse hold.
-      if (!held) await this.#stopAll();
-      else await this.#send(this.commands[key]);
-    }
+    this.intent.move = held ? `move${held[0].toUpperCase()}${held.slice(1)}` : '';
     if (msg.jump) await this.#send(this.commands.jump);
     await this.#setToggle('sneak', msg.sneak === true, this.commands.sneakOn);
     await this.#setToggle('sprint', msg.sprint === true, this.commands.sprintOn);
+  }
+
+  /**
+   * Put the body exactly where the browser's local simulation says it is.
+   *
+   * Rate-limited rather than sent per frame: RCON commands are drained on the tick thread
+   * and serialised on one connection, so a 60 Hz stream would queue behind itself. At
+   * `GOTO_MIN_MS` the body is placed often enough to look continuous and the traffic stays
+   * in the same order as the existing position poll.
+   *
+   * A repeat of the same position is RE-ASSERTED rather than skipped — see
+   * GOTO_KEEPALIVE_MS for the fall into the void that bought that line.
+   */
+  async goto(msg) {
+    if (!this.active) return;
+    const x = Number(msg.x);
+    const y = Number(msg.y);
+    const z = Number(msg.z);
+    if (![x, y, z].every(Number.isFinite)) return;
+    const now = Date.now();
+    if (now - this.#lastGotoAt < GOTO_MIN_MS) return;
+    const at = `${x.toFixed(3)} ${y.toFixed(3)} ${z.toFixed(3)}`;
+    if (at === this.#lastGoto && now - this.#lastGotoAt < GOTO_KEEPALIVE_MS) return;
+    this.#lastGotoAt = now;
+    this.#lastGoto = at;
+    await this.#send(this.commands.goto
+      .replace('{x}', x.toFixed(3))
+      .replace('{y}', y.toFixed(3))
+      .replace('{z}', z.toFixed(3)));
   }
 
   /**
@@ -316,7 +391,6 @@ export class FakePlayer {
    */
   async #stopAll() {
     await this.#send(this.commands.stop);
-    this.#lastMove = this.intent.move || 'moveStop';
     if (this.intent.move) await this.#send(this.commands[this.intent.move]);
     if (this.intent.digging) await this.#send(this.commands.digStart);
     if (this.intent.sneak) await this.#send(this.commands.sneakOn);
@@ -433,7 +507,6 @@ export class FakePlayer {
   async halt() {
     if (!this.active) return;
     this.intent = { move: '', digging: false, sneak: false, sprint: false };
-    this.#lastMove = 'moveStop';
     await this.#send(this.commands.stop);
   }
 

@@ -17,6 +17,7 @@
 import type { Viewer } from '../render/viewer.js';
 import type { World } from '../render/world.js';
 import { voxelCast, type VoxelHit } from './raycast.js';
+import { NO_INTENT, type IntentKey, type PredictIntent } from './predict.js';
 
 /**
  * How often look intents may be sent. The server does not need 500 turns a second.
@@ -106,6 +107,10 @@ export class LiveControls {
   private stick: TouchDrag | null = null;
   private lookDrag: TouchDrag | null = null;
   private stickDir = '';
+  /** Overwritten by `setReach` from the extracted physics table. */
+  private reach = 5;
+  /** The on-screen joystick's direction, in SCREEN space, or null when centred. */
+  private analog: { x: number; y: number } | null = null;
   /** A look the throttle suppressed, owed to the server when the gesture ends. */
   private lookDirty = false;
   /**
@@ -227,6 +232,65 @@ export class LiveControls {
     const cam = this.deps.viewer.camera;
     cam.position.set(pos[0], pos[1] + EYE_HEIGHT, pos[2]);
     cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+  }
+
+  /**
+   * The keys that are down right now, as the predictor wants them.
+   *
+   * The SAME state `sendControls` turns into an `input` frame for the server — read from
+   * one place rather than tracked twice, because a predictor that disagrees with what was
+   * actually sent would drift for a reason nobody could find.
+   */
+  /**
+   * The joystick's direction.
+   *
+   * `y` arrives DOM-style (downward positive) and is flipped here, once, so that everything
+   * downstream sees forward-positive — two conventions loose in the codebase is how a
+   * control ends up inverted for one input device and not the other.
+   */
+  setAnalog(v: { x: number; y: number; magnitude: number } | null): void {
+    this.analog = v && v.magnitude > 0 ? { x: v.x, y: -v.y } : null;
+    // The server path is discrete, so the stick also drives the ordinary intents.
+    this.sendControls();
+  }
+
+  intent(): PredictIntent {
+    const out: PredictIntent = { ...NO_INTENT, analog: this.analog };
+    for (const code of this.held) {
+      const name = CONTROL_KEYS[code] as IntentKey | undefined;
+      if (name) out[name] = true;
+    }
+    if (this.stickDir) out[this.stickDir as IntentKey] = true;
+    if (this.jumpOnce) out.jump = true;
+    return out;
+  }
+
+  /** Is the dig button held right now? Drives the break-progress overlay. */
+  get isDigging(): boolean {
+    return this.digging;
+  }
+
+  /** The block the crosshair is on, for the break overlay. Null when nothing is in reach. */
+  targetBlock(): VoxelHit | null {
+    return this.raycast();
+  }
+
+  /** The camera's yaw, so the predictor walks in the direction the crosshair points. */
+  get lookYaw(): number {
+    return this.yaw;
+  }
+
+  /**
+   * How far the crosshair may reach, in blocks.
+   *
+   * Was a hardcoded 5. The real figure is `Attributes.BLOCK_INTERACTION_RANGE`, which the
+   * physics extraction reads as **4.5** — so the crosshair used to target blocks half a
+   * block further than the server would accept, and a click at that distance was sent,
+   * acknowledged and silently did nothing. Set from the extracted table once it loads;
+   * until then this stays at the old value rather than inventing a new one.
+   */
+  setReach(blocks: number): void {
+    if (Number.isFinite(blocks) && blocks > 0) this.reach = blocks;
   }
 
   /** Latest server-reported position, kept so the raycast starts from the real player. */
@@ -598,6 +662,10 @@ export class LiveControls {
     for (const control of Object.values(CONTROL_KEYS)) msg[control] = false;
     for (const code of this.held) msg[CONTROL_KEYS[code]] = true;
     if (this.stickDir) msg[this.stickDir] = true;
+    // The joystick is analog locally but the server command path is not, so it is reduced
+    // to its dominant axis here. That is only ever the SERVER's copy of the movement — the
+    // camera follows the local simulation, which uses the full analog vector.
+    for (const dir of dominantDirections(this.analog)) msg[dir] = true;
     if (this.jumpOnce) msg.jump = true;
     this.send(msg);
   }
@@ -606,7 +674,7 @@ export class LiveControls {
    * Voxel raycast from the eye along the view direction, so dig and place target the same
    * block the crosshair is on. The walk itself is shared with the isometric picker.
    */
-  private raycast(maxDist = 5): VoxelHit | null {
+  private raycast(maxDist = this.reach): VoxelHit | null {
     const dir: [number, number, number] = [
       -Math.sin(this.yaw) * Math.cos(this.pitch),
       Math.sin(this.pitch),
@@ -614,4 +682,24 @@ export class LiveControls {
     ];
     return voxelCast(this.deps.world, this.deps.viewer.camera.position, dir, maxDist);
   }
+}
+
+/**
+ * The one or two cardinal directions an analog vector mostly points in.
+ *
+ * Used only for the server's discrete `move` command; the local simulation walks the exact
+ * vector. Both axes are reported when the stick is near a diagonal, so pushing north-east
+ * does not read as pure north.
+ */
+export function dominantDirections(
+  v: { x: number; y: number } | null,
+): Array<'forward' | 'back' | 'left' | 'right'> {
+  if (!v) return [];
+  const out: Array<'forward' | 'back' | 'left' | 'right'> = [];
+  const ax = Math.abs(v.x);
+  const ay = Math.abs(v.y);
+  const floor = Math.max(ax, ay) * 0.4;
+  if (ay >= floor && ay > 0.01) out.push(v.y > 0 ? 'forward' : 'back');
+  if (ax >= floor && ax > 0.01) out.push(v.x > 0 ? 'right' : 'left');
+  return out;
 }

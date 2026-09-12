@@ -93,6 +93,12 @@ export interface BakedQuad {
   /** the geometric facing, used for lighting/AO and for greedy-merge grouping */
   facing: Direction;
   tintIndex: number;
+  /**
+   * A literal multiply colour baked into the quad, for geometry whose colour comes from
+   * entity data rather than from a biome: a sheep's wool takes its RGB from the `Color`
+   * byte, which no `tintIndex` can express. Absent on every block quad.
+   */
+  tint?: readonly [number, number, number];
   shade: boolean;
   normal: [number, number, number];
 }

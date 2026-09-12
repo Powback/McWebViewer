@@ -268,6 +268,20 @@ It accepts nothing from the browser — there is no control surface to get wrong
 docker compose up -d --build
 ```
 
+> **THE PAGE AND THE BRIDGE DEPLOY DIFFERENTLY, and forgetting that hides finished work.**
+> `npx vite build` writes `dist/`, which is mounted, so a page change is live the moment it
+> builds. The bridge is a CONTAINER: its source can be correct, committed and tested while the
+> running process is days old and does not contain the change at all.
+>
+> That is not hypothetical. Movement was converted from the stateful per-tick `player <name>
+> move forward` to a position-driven `tp` (see `goto` in `bridge/src/fake-player.mjs`) precisely
+> so that walking speed would stop scaling with the server's tick rate — and the browser sent
+> `goto` at a three-day-old bridge with no `goto` handler, which silently fell back to the
+> per-tick path. The symptom was the exact bug the fix had already solved, and the source read
+> as correct the whole time (2026-09-11).
+>
+> **After any change under `bridge/`:** `docker compose up -d --build mcwv-bridge`.
+
 Then **http://mcwebviewer.pow/?live** (add `&at=x,y,z,dist` to aim the camera). The
 bridge's socket is proxied at `/live` on the same origin, so there is no second hostname
 and no cross-origin WebSocket. `?live=ws://elsewhere:8080` overrides it.
@@ -499,6 +513,47 @@ Instead the bridge joins the Minecraft stack's own Docker network
 (`minecraft-create121_default`, declared `external` in `docker-compose.yaml`) and reaches
 RCON at `mc:25575`. That is a change to *this* project's container only: nothing about
 the Minecraft server, its config, or its uptime is touched.
+
+### Two world sources: `bridge` and `spacetime`
+
+The live view can come from either of two genuinely different pipelines. **`bridge` is the
+default and is unchanged**; `spacetime` is additive.
+
+| | `bridge` (default) | `spacetime` |
+|---|---|---|
+| how | RCON bridge polls players/turtles, asks for `save-all flush`, browser re-reads the region files | `../mcspacetime` joins the server as a real Minecraft protocol client and mirrors it into SpacetimeDB |
+| needs | nothing | that bot running, plus `mcspacetime-db` |
+| entities | move only when the server writes to disk — ≥2 s, backing off to 120 s | move at packet rate |
+| terrain | region files | live `chunk_section` rows, unpacked and meshed through the same path |
+| biomes / light / block entities | region files | region files (not yet carried) |
+| monitor text | `screen.json` | `screen.json` — a CC terminal is not on the wire in either mode |
+
+Switching needs no rebuild:
+
+```bash
+# whole deployment (container restart)
+MCWV_SOURCE=spacetime docker compose up -d mcwebviewer
+
+# or one tab, against any deployment
+http://mcwebviewer.pow/?source=spacetime
+```
+
+`MCWV_STDB_URI` (default `http://mcspacetime.pow`) and `MCWV_STDB_DB` (default
+`mcspacetime`) address the database. The setting is served at `/dev/source.json`, the same
+way `/dev/manifest.json` already works, and the HUD prints which source is live and where
+the choice came from — a toggle nobody can see is a toggle that confuses people.
+
+Only entity *samples* change; both paths feed the same renderer, so interpolation, meshes,
+name tags and item icons are the identical code either way. Two things the spacetime path
+does not resolve, because the wire does not carry them as such: a dropped item's stack and a
+falling block's state, which draw as their generic type.
+
+```bash
+npm run spacetime-proof     # end-to-end check: terrain, u64 fidelity, live edits, motion
+npm run gen-bindings        # regenerate src/module_bindings after a module schema change
+```
+
+**Point the bot at the dev replica, never at the live server.** See `../mcspacetime/CLAUDE.md`.
 
 ### Playing from the browser
 
@@ -759,43 +814,102 @@ three different heights and does not change.
 exactly when you want it — playing in first person means the canvas holds the pointer lock,
 and a locked pointer is captured by the canvas, so a click on the button never arrives.
 
-#### Click to move actually pathfinds
+#### Click to move actually pathfinds, and the game's own physics walks it
 
 It used to be steering: face the point, hold forward, jump every 600 ms if nothing was
-happening, abandon the walk after four seconds. That was honest about the bridge — its
-whole vocabulary is `move forward|back|left|right` plus `turn`, and there is no goto in it
-— but it walked around nothing, so the first tree ended the walk with the character shoving
-into it.
+happening, abandon the walk after four seconds. That walked around nothing, so the first
+tree ended the walk with the character shoving into it. It was then planned — and then it
+stopped working altogether, silently, for a reason that had nothing to do with the plan.
 
-The route is now planned **in the browser**, over the chunks the viewer is already
-rendering. It knows what is solid, what is air and where the ground is, so nothing new has
-to be asked of the server: **no `goto` verb was added to the bridge.** The plan is fed to
-the same steering, one waypoint at a time.
+**Is there a native pathfinder on the server to use instead?** Asked directly rather than
+assumed, on 2026-09-11, because "use the engine's own pathfinding" is the obviously right
+answer if it is reachable. It is not, twice over:
+
+- The live server's whole `/help` dump — vanilla plus 130 mods — contains no path, goto or
+  navigate verb. The one bot mod installed is SiliconeDolls, whose entire vocabulary is
+  `spawn|kill|<action>|sneak|unsneak|sprint|unsprint|mount|dismount|look|turn|dropStack|
+  move|hotbar|shadow|stop`. There is nothing to call.
+- It is not merely unexposed. In Minecraft `PathNavigation` belongs to `Mob`, and a
+  `ServerPlayer` is not a `Mob` and has no navigator at all — so there is no server-side
+  *player* pathfinder to reach even with a new mod, only one somebody could write. And
+  loading a mod means restarting the server, which is not ours to do.
+
+**What IS native is the movement, and that turns out to be the half that matters.** The
+route is planned here, over the chunks the viewer is already rendering; it is *executed* by
+`PredictedBody` — the game's own extracted gravity, jump strength, step height, sprint
+multiplier and per-state `VoxelShape` collision (see [Movement prediction](#movement-prediction)
+and `src/app/physics.ts`). Falling, stepping up, the arc of a jump and the extra reach of a
+sprint jump are the engine's answers, not the planner's. The planner asks the same constants
+how far a jump carries the body (`jumpSpan`) and refuses anything the simulation could not
+perform, so plan and execution cannot disagree.
+
+##### The bug: every layer succeeded and the character never moved
+
+Click-to-walk was turned off behind a flag, and the comment on that flag blamed "the
+pathing". The planner was largely fine. What was broken was the **drive**, and it broke
+without anybody touching this code:
+
+1. movement moved from commands to teleports — `FakePlayer.input()` no longer issues a
+   `move` command at all, because the body is now driven by `tp` from the browser's local
+   simulation (that is what made walking speed independent of a 145 tps server);
+2. the isometric view was still sending `{t:'input', forward:true}` at the bridge, which
+   now moves nothing;
+3. and `LiveView` teleports the server's bot onto the **local** body every frame — a local
+   body that, in this mode, nothing was stepping, because `LiveControls` is unbound in the
+   isometric view and its intent is all-false.
+
+So the bot was pinned in place by the very teleport meant to drive it. Every layer reported
+success. The fix is that the isometric view now produces a `PredictIntent` — the same shape
+WASD produces — and `LiveView` feeds it to the same simulation. The tests walk the route
+with the real `PredictedBody` and assert **where the body ended up**, because a test that
+asserted "a forward frame went on the wire" would have passed throughout.
+
+##### What the planner will and will not agree to walk
 
 It models a player rather than a point. The body is two blocks tall, so a cell needs air at
 the feet *and* at head height. It steps up one block, and only with headroom over where it
-is standing. It drops up to three, and only down a column that is actually clear. It will
+is standing. It drops up to three — exactly the largest fall vanilla charges nothing for,
+since fall damage is `distance - 3` — and only down a column that is actually clear. It will
 not squeeze diagonally through a corner, will not stand in water, lava or fire, and will
 not route through chunks nobody has loaded — `World.getState` answers AIR outside them,
 which reads as walkable and is how a planner marches off the edge of the world.
 
-**It cannot jump a gap, so it does not plan one.** A one-block hole in a walkway is a wall
-to this planner. That is the honest expression of "refuse a route the bot cannot walk":
-there is no such move, so there is no such route, and the walk is refused before the first
-step instead of discovered after four seconds of shoving.
+**It jumps gaps, and sprint-jumps the wider ones — but never by more than the body really
+travels.** Nothing here is parkour trivia anybody remembered. The body leaves the ground at
+the extracted `jumpStrength` and is pulled down at the extracted `gravity`, so the time in
+the air before it is `dy` above where it started is the positive root of
+`-g/2 t² + v t - dy = 0`, and the ground covered is horizontal speed times that. On this
+world's numbers that is a **one-block gap at walking speed, a two-block gap at a run, and a
+refusal past that** — and a jump *downhill* reaches further, because it is in the air
+longer, which falls straight out of the same equation rather than being a special case. A
+gap it cannot cross is still a wall, and the walk is refused before the first step.
+
+Falling is guarded twice, because "never path off a ledge" is two requirements. The planner
+has no edge that drops further than is safe; and the follower reads the cell it is about to
+walk into and stops if there is nowhere to stand within a safe drop — which is what catches
+a route that was correct when it was planned and had its floor mined out from under it, or
+that reached the edge of the streamed world.
+
+**A walk always ends.** It arrives — within 0.22 blocks of the block you tapped, easing
+into the last one so it converges instead of hunting — or it reports `no path`, or it
+reports `stuck`. A leg that stops closing is re-planned, three times at most; and the whole
+walk has a 90-second deadline, which is the one give-up that catches a walk where no
+individual step ever looks wrong and the thing still never ends.
 
 Two things it costs, both deliberate:
 
 - **Bounded and resumable.** This runs on a phone. The search is capped at 6000 node
   expansions and 64 blocks, and `step(n)` expands at most n nodes per call — 600 per frame,
   so a full search finishes inside ten frames and no frame pays for more than a fraction of
-  a millisecond. When the cap is hit, a route that gets *meaningfully* closer is walked and
-  re-planned on arrival; one that does not is reported as failure.
+  a millisecond. Measured with jump edges in: 0.5 ms for an open-ground search, 4 ms for a
+  3288-node search through a maze. When the cap is hit, a route that gets *meaningfully*
+  closer is walked and re-planned on arrival; one that does not is reported as failure.
 - **The route is straightened before it is walked.** A* on a cell grid returns a staircase,
   and a follower that re-aims the body at every cell spends its time turning. Measured
   against the live server before straightening was added: a ten-cell route moved the
   character **four blocks in sixty seconds**. Collapsing it to the furthest cell still
-  reachable in a straight walk turns that into two or three long legs.
+  reachable in a straight walk turns that into two or three long legs. A jump is never
+  collapsed into a leg, which is what lets the follower know where the take-off is.
 
 Measured on the live server with `npm run walk-proof`, which drives the deployed page with
 puppeteer and reads every position back off the bridge's RCON poll — so these are the

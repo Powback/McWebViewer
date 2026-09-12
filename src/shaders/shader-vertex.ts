@@ -66,9 +66,15 @@ export function vertexBufferLayout(): GPUVertexBufferLayout {
  * generated block-entity geometry) has no defined tangent; falling back to a fixed axis
  * keeps normal mapping stable instead of producing NaNs that propagate into the gbuffer.
  */
-function quadTangent(p: Float32Array, uv: Float32Array, base: number): [number, number, number, number] {
+function quadTangent(
+  p: Float32Array,
+  uv: Float32Array,
+  base: number,
+  /** where this quad's uvs start in `uv` -- 0 when the caller passed a decoded 8-float quad. */
+  uvBase = base * 2,
+): [number, number, number, number] {
   const i = base * 3;
-  const j = base * 2;
+  const j = uvBase;
   const e1 = [p[i + 3] - p[i], p[i + 4] - p[i + 1], p[i + 5] - p[i + 2]];
   const e2 = [p[i + 6] - p[i], p[i + 7] - p[i + 1], p[i + 8] - p[i + 2]];
   const du1 = uv[j + 2] - uv[j];
@@ -125,17 +131,32 @@ function writeBase(
 }
 
 /** Per-quad fields: the same value on all four vertices. */
+/**
+ * This quad's four uvs as floats in 0..1.
+ *
+ * Section uvs ship as normalized uint16 to halve what a vertex costs, and the GPU decodes them --
+ * but this path is CPU-side and reads the array directly, where 0..65535 is just a big number.
+ * `mc_midTexCoord` would land far outside the atlas and the tangent would be scaled with it.
+ */
+function quadUvs(buf: LayerBuffers, base: number): Float32Array {
+  const scale = buf.uvs instanceof Float32Array ? 1 : 1 / 65535;
+  const out = new Float32Array(8);
+  for (let k = 0; k < 8; k++) out[k] = buf.uvs[base * 2 + k]! * scale;
+  return out;
+}
+
 function writeQuad(out: Float32Array, buf: LayerBuffers, quad: number): void {
   const base = quad * 4;
+  const uvs = quadUvs(buf, base);
   let midU = 0;
   let midV = 0;
   for (let k = 0; k < 4; k++) {
-    midU += buf.uvs[(base + k) * 2];
-    midV += buf.uvs[(base + k) * 2 + 1];
+    midU += uvs[k * 2]!;
+    midV += uvs[k * 2 + 1]!;
   }
   midU /= 4;
   midV /= 4;
-  const tangent = quadTangent(buf.positions, buf.uvs, base);
+  const tangent = quadTangent(buf.positions, uvs, base, 0);
   for (let k = 0; k < 4; k++) {
     const o = (base + k) * VERTEX_FLOATS;
     writeRange(out, o + OFFSETS.mc_midTexCoord, [midU, midV, 0, 1]);

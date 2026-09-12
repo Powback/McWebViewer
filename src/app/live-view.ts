@@ -39,15 +39,35 @@ import {
 import { LiveControls } from './live-controls.js';
 import { IsoView, type CameraMode } from './iso-view.js';
 import { navWorld } from './nav-world.js';
+import { blockShapes } from './block-shapes.js';
+import { PredictedBody, type PredictIntent } from './predict.js';
+import {
+  FALLBACK_MOTION, loadPhysics, motionFrom, type MotionConstants, type PhysicsData,
+} from './physics.js';
 import { TouchPad } from './touch-pad.js';
 import { PlayHud, type Stack, type Vitals } from './play-hud.js';
 import { loadItemIcons, type ItemIcons } from '../render/item-icons.js';
 import { PlayerTracks, type RosterEntry, type TrackPose } from './player-tracks.js';
 import { NameTags } from '../render/name-tags.js';
 import { LiveEntities } from './live-entities.js';
+import { SpacetimeEntities, connect as connectSpacetime } from './spacetime-entities.js';
+import { SpacetimeTerrain } from './spacetime-sections.js';
+import { SpacetimeNative } from './spacetime-native.js';
+import { SourceToggle } from './source-toggle.js';
+import { Joystick } from './joystick.js';
+import { RecipeBook, type RecipeBundleView } from './recipe-book.js';
+import { HeldItems, handsFrom } from '../render/held-item.js';
+import { BreakOverlay } from '../render/break-overlay.js';
+import { BreakTracker, breakSeconds, type TagIndex } from './break-progress.js';
+import { SoundEngine } from '../render/sound.js';
+import {
+  Footsteps, eventForChange, soundFor, eventsForPalette, allBlockEvents,
+} from './block-sounds.js';
+import { loadSource, describeSource, type WorldSourceConfig } from './world-source.js';
 import { MonitorScreens } from './monitor-screens.js';
 import { ScreenFiles } from './screen-files.js';
 import type { LiveMonitor } from './live.js';
+import { hasCellColour } from './monitor-screens.js';
 import { followPlacement, nextFollowed } from './follow-camera.js';
 
 /** Regions are the overworld's; a player in the nether is tracked but not drawn. */
@@ -75,6 +95,14 @@ export interface LiveViewDeps {
   regionBase: string;
   /** the parallel `entities/` regions to watch for mobs, items and falling blocks */
   entityRegions: readonly string[];
+  /**
+   * Every canonical state key the baked bundle can render.
+   *
+   * Only the spacetime terrain path uses it, to recover the block properties the wire omits
+   * (see spacetime-sections.ts). Optional: without it that path still runs, it just cannot
+   * pin down a default and says so on the HUD instead of drawing the wrong thing.
+   */
+  bakedKeys?: () => Iterable<string>;
   /** URL prefix the entity regions are served from, e.g. `/dev/entities` */
   entityBase: string;
   /** URL prefix the bake is served from, for the item atlas */
@@ -113,6 +141,28 @@ export class LiveView {
   private watcher: RegionWatcher;
   /** Save-file mobs, items and falling blocks, re-read on the same flush and interpolated. */
   private entities: LiveEntities;
+  /**
+   * The spacetime entity feed, when that source is selected. Null on the bridge path, which
+   * is the default and is deliberately left exactly as it was.
+   */
+  private spacetime: SpacetimeEntities | null = null;
+  private stTerrain: SpacetimeTerrain | null = null;
+  private stNative: SpacetimeNative | null = null;
+  private sourceToggle: SourceToggle | null = null;
+  private stick: Joystick | null = null;
+  private sound: SoundEngine | null = null;
+  private recipes: RecipeBook | null = null;
+  private hands: HeldItems;
+  private breaking = new BreakTracker();
+  private breakOverlay: BreakOverlay | null = null;
+  /** Block tags, for tool-vs-block matching. Named apart from the `tags` name-plate layer. */
+  private blockTags: TagIndex | null = null;
+  private heldMain: string | null = null;
+  /** the last inventory seen, so a hotbar change can re-read the held stack */
+  private stacks: Array<{ slot: number; id: string; count: number }> = [];
+  private selectedSlot = 0;
+  private footsteps = new Footsteps();
+  private source: WorldSourceConfig | null = null;
   /**
    * Which camera owns the screen. First person is the default because it is what "join a
    * server and play" means; the isometric view is a mode you ask for, from a button.
@@ -175,6 +225,20 @@ export class LiveView {
   private lastSample: { pos: [number, number, number]; t: number } | null = null;
   private velocity: [number, number, number] = [0, 0, 0];
   private smoothed: [number, number, number] | null = null;
+  /**
+   * The locally-simulated body. Everything the camera shows while you are driving comes
+   * from here; `smoothed` became the thing it is RECONCILED AGAINST rather than the thing
+   * that is drawn. See predict.ts and PARITY-AUDIT.md §2.
+   */
+  private body: PredictedBody;
+  /**
+   * The constants the body is running on, kept so the PLANNER can be asked the same thing.
+   *
+   * The body owns them, but it does not hand them back, and a second copy of "what gravity
+   * is" is exactly how a planner ends up plotting a jump the simulation cannot make.
+   */
+  private motion: MotionConstants = FALLBACK_MOTION;
+  private physics: PhysicsData | null = null;
 
   constructor(url: string, private deps: LiveViewDeps) {
     this.watcher = new RegionWatcher(httpRangeFetch(deps.regionBase), deps.regions, deps.chunkFilter);
@@ -206,12 +270,15 @@ export class LiveView {
       onMonitors: (list) => { this.feedScreens = list; this.paintScreens(); },
       onReload: () => {
         void this.sync();
-        void this.entities.onReload();
+        // On the spacetime path entities arrive continuously, so the flush must not also
+        // re-read them from disk — that would overwrite fresh packet-rate positions with
+        // whatever the last save happened to hold.
+        if (!this.spacetime) void this.entities.onReload();
       },
       onControl: (c) => this.onControl(c),
       onSelf: (s) => this.onSelf(s),
-      onVitals: (v) => this.hud.setVitals(v as unknown as Vitals),
-      onInventory: (stacks) => this.hud.setInventory(stacks as Stack[]),
+      onVitals: (v) => this.onVitals(v),
+      onInventory: (stacks) => this.onInventory(stacks),
       onBlock: (b) => this.onBlock(b),
       onChat: (m) => this.hud.addChat(m),
     });
@@ -229,11 +296,17 @@ export class LiveView {
       viewer: deps.viewer,
       world: deps.world,
       send: (msg) => this.client.send(msg),
-      isTyping: () => this.typing,
+      isTyping: () => this.typing || this.recipes?.typing === true,
       onInventory: () => this.hud.toggleInventory(),
       onChat: () => this.hud.openChat(),
       onUseBlock: (pos) => this.client.send({ t: 'openBlock', x: pos[0], y: pos[1], z: pos[2] }),
     });
+    // Real collision shapes where we have them, the mod's own model where we do not, the
+    // old name heuristic last — see block-shapes.ts. `physics` is null until the fetch
+    // below lands, which only costs accuracy, never correctness.
+    this.body = new PredictedBody(blockShapes(deps.world, navWorld(deps.world), null));
+    this.hands = this.makeHands();
+    void this.loadPhysicsTable();
     this.iso = new IsoView({
       canvas: deps.viewer.renderer.domElement,
       camera: deps.viewer.camera,
@@ -241,8 +314,16 @@ export class LiveView {
       // The same chunks the renderer holds, asked what a walking body needs to know. The
       // planner is CLIENT-SIDE for exactly this reason: the data is already here.
       nav: navWorld(deps.world),
+      // What the cutaway has taken out of the picture, so a click into a revealed room does not
+      // resolve to the roof that was removed to show it.
+      revealHides: (x, y, z) => deps.viewer.revealHides(x, y, z),
       send: (msg) => this.client.send(msg),
       setSubject: (pos) => deps.viewer.setSubject(pos),
+      // The planner works out how far a jump carries the body from the SAME constants the
+      // body is running on this frame, and from the speed it has actually measured — see
+      // IsoViewDeps.motion. Read through a callback because both keep changing after the
+      // page loads.
+      motion: () => ({ motion: this.motion, speed: this.body.stats().speed }),
     });
     // The pad drives the SAME entry points the mouse and keyboard drive, so a phone and a
     // desktop cannot drift apart in what they are able to do.
@@ -357,7 +438,390 @@ export class LiveView {
       }
     }
     if (!this.smoothed) this.smoothed = [...sample.pos] as [number, number, number];
+    // Raw samples, not the smoothed estimate: the calibration is measuring what the SERVER
+    // actually did, and smoothing it first would measure our own filter instead.
+    // The ACTIVE intent, not the keyboard's: walking speed is measured from sample pairs
+    // taken while exactly one direction was held, and in the isometric view the keyboard is
+    // unbound and holding nothing — so measuring against it meant a click-to-move walk
+    // never calibrated and the planner kept sizing its jumps off the seed speed.
+    this.body.observe(sample.pos, sample.at, this.activeIntent());
+    if (!this.body.active) this.body.reset(sample.pos);
     this.controls.setBotPose(sample.pos);
+  }
+
+  /**
+   * Fetch the extracted physics table and hand its constants to the body.
+   *
+   * Failure is not fatal and is not silent: without the table the body keeps FALLBACK_MOTION
+   * and `stats().measured` stays false, which the HUD prints — so "the movement feels off"
+   * and "the physics table never loaded" cannot look the same on screen.
+   */
+  private async loadPhysicsTable(): Promise<void> {
+    const data = await loadPhysics();
+    if (!data) {
+      this.deps.status('live: physics.json not loaded — movement uses FALLBACK constants and'
+        + ' collision falls back to whole blocks (run harness/run.sh to bake it)');
+      return;
+    }
+    this.physics = data;
+    this.refreshHands();
+    const motion = motionFrom(data.player);
+    this.motion = motion;
+    this.body.setMotion(motion);
+    // The crosshair's reach is the game's, not the 5 this used to assume.
+    this.controls.setReach(motion.reach);
+    this.body.setShapes(blockShapes(this.deps.world, navWorld(this.deps.world), data));
+  }
+
+  /**
+   * Bring up the SpacetimeDB entity feed.
+   *
+   * A failure here falls back to the save-file path rather than leaving the viewer with no
+   * entities at all: a degraded view that says so beats an empty one that does not.
+   */
+  private async startSpacetime(): Promise<void> {
+    const cfg = this.source;
+    if (!cfg) return;
+    const feed = new SpacetimeEntities({
+      onRoster: (roster) => this.entities.ingestExternal(roster),
+      // Panels go into the same slot the bridge's screen.json feed uses, so the painter does
+      // not know or care which source drew them — and the per-cell colour the bridge can
+      // never supply simply arrives filled in. See spacetime-monitors.ts.
+      onMonitors: (panels) => { this.feedScreens = panels; this.paintScreens(); },
+      status: (m) => this.deps.status(m),
+    });
+    try {
+      const conn = await connectSpacetime(cfg.stdbUri, cfg.database, (m) => this.deps.status(m));
+      feed.attach(conn);
+      this.spacetime = feed;
+      this.startSpacetimeTerrain(conn, cfg.stdbUri, cfg.database);
+      // Players and computers natively, so nothing here needs the bridge.
+      const native = new SpacetimeNative({
+        onPlayers: (list) => this.onPlayers(list),
+        onComputers: (list) => this.onComputers(list),
+        status: (m) => this.deps.status(m),
+      });
+      native.attach(conn as never);
+      this.stNative = native;
+    } catch (e) {
+      this.deps.status(
+        `spacetime: entity feed unavailable (${(e as Error).message}) — falling back to the save files`);
+      await this.entities.start();
+    }
+  }
+
+  /**
+   * Terrain over the same connection.
+   *
+   * Sections go into the very same `World.addLiveSection` the save-file live path uses and
+   * are marked dirty through the very same `invalidatedSections`, so `pump()` re-meshes them
+   * without knowing or caring where they came from.
+   *
+   * `bakedKeys` hands the namer the bundle's canonical keys, which is how it recovers the
+   * properties the wire leaves out — see spacetime-sections.ts.
+   */
+  private startSpacetimeTerrain(conn: unknown, uri: string, database: string): void {
+    const base = uri.replace(/\/$/, '');
+    this.stTerrain = new SpacetimeTerrain({
+      world: this.deps.world,
+      sql: async (query) => {
+        try {
+          const res = await fetch(`${base}/v1/database/${database}/sql`, {
+            method: 'POST', headers: { 'content-type': 'text/plain' }, body: query,
+          });
+          if (!res.ok) return null;
+          const body = (await res.json()) as Array<{ rows?: unknown[][] }>;
+          return body[0]?.rows ?? [];
+        } catch {
+          return null;
+        }
+      },
+      bakedKeys: () => this.deps.bakedKeys?.() ?? [],
+      onSection: (cx, cy, cz) => {
+        for (const key of invalidatedSections(cx, cy, cz)) this.dirty.add(key);
+      },
+      onBlockChange: (pos, oldKey, newKey) => this.blockChanged(pos, oldKey, newKey),
+      status: (m) => this.deps.status(m),
+    });
+    this.stTerrain.attach(conn as never);
+  }
+
+  /**
+   * Block tags, for working out whether the held tool is the right one.
+   *
+   * A separate bake from `physics.json` because the harness CANNOT resolve them: a
+   * registry-only boot loads no datapack tags, so every tag it sees is empty. See
+   * server/tag-bake.ts.
+   */
+  private async loadTags(): Promise<void> {
+    try {
+      const res = await fetch(`${this.deps.bakedBase}/tags.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.blockTags = (await res.json()) as TagIndex;
+    } catch {
+      // Without tags every tool reads as the wrong one, so mining times come out at
+      // bare-hand speed. Said rather than silently slow.
+      this.deps.status('break progress: no tags.json — tool speeds will read as bare hands');
+    }
+  }
+
+  /**
+   * Advance the mining overlay.
+   *
+   * The tracker is keyed on the block's POSITION as well as its state, so two adjacent
+   * stone blocks do not share progress; looking away and back starts again, as in vanilla.
+   */
+  private updateBreaking(dt: number): void {
+    if (!this.breakOverlay) {
+      this.breakOverlay = new BreakOverlay(this.deps.viewer.scene);
+      const atlas = this.deps.getAtlas();
+      if (atlas) this.breakOverlay.setAtlas(atlas);
+    }
+    const hit = this.controls.isDigging ? this.controls.targetBlock() : null;
+    if (!hit) {
+      this.breaking.update(null, null, dt);
+      this.breakOverlay.show(null, -1);
+      return;
+    }
+    const [bx, by, bz] = hit.block;
+    const id = this.deps.world.getState(bx, by, bz);
+    const stateKey = this.deps.world.palette[id] ?? '';
+    const seconds = breakSeconds(
+      { physics: this.physics, tags: this.blockTags, tool: this.heldMain }, stateKey);
+    this.breaking.update(`${stateKey}@${bx},${by},${bz}`, seconds, dt);
+    this.breakOverlay.show([bx, by, bz], this.breaking.stage);
+  }
+
+  /** Vitals also carry the selected hotbar slot, which decides the main hand. */
+  private onVitals(v: Record<string, unknown>): void {
+    this.hud.setVitals(v as unknown as Vitals);
+    const slot = v.selectedSlot;
+    if (typeof slot === 'number') {
+      this.selectedSlot = slot;
+      this.refreshHands();
+    }
+  }
+
+  private onInventory(stacks: Array<{ slot: number; id: string; count: number }>): void {
+    this.hud.setInventory(stacks as Stack[]);
+    this.stacks = stacks;
+    this.refreshHands();
+  }
+
+  /** The two in-hand view models, drawn through the ordinary block mesher. */
+  private makeHands(): HeldItems {
+    return new HeldItems({
+      camera: this.deps.viewer.camera,
+      getStates: () => this.deps.getStates(),
+      getAtlas: () => this.deps.getAtlas(),
+      getIcons: () => this.icons,
+    });
+  }
+
+  /**
+   * Put the selected hotbar stack in the main hand and slot 40 in the off hand.
+   *
+   * `data get entity <name> Inventory` returns EVERY compartment in one list keyed by slot,
+   * so the off hand is in there already — it just needed identifying, and the slot number is
+   * a Java constant (`Inventory.SLOT_OFFHAND`) the harness now extracts rather than this
+   * guessing at 40.
+   */
+  private refreshHands(): void {
+    const { main, off } = handsFrom(
+      this.stacks, this.selectedSlot, this.physics?.player.offhandSlot);
+    this.heldMain = main;
+    this.hands.set('main', main);
+    this.hands.set('off', off);
+  }
+
+  /**
+   * The recipe browser: every mod's recipes, from the bake.
+   *
+   * Fetched lazily and gzip-served alongside the other baked artifacts (338 KB on the wire).
+   * A failure here costs the panel, not the page.
+   */
+  private startRecipes(): void {
+    const book = new RecipeBook({
+      root: this.deps.hudRoot,
+      getIcons: () => this.icons,
+    });
+    this.recipes = book;
+    void (async () => {
+      try {
+        const res = await fetch(`${this.deps.bakedBase}/recipes.json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const bundle = (await res.json()) as RecipeBundleView;
+        book.setBundle(bundle);
+        this.deps.status(
+          `recipes: ${bundle.stats.parsed} from ${bundle.stats.types} types`
+          + ` (${bundle.stats.unreadable} unreadable) — press R`);
+      } catch (e) {
+        this.deps.status(`recipes: not available (${(e as Error).message})`
+          + ' — run `npm run bake-assets`');
+      }
+    })();
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'KeyR' || this.typing || book.typing) return;
+      // R is also "respawn" while driving a fake player; the browser only takes it when
+      // nothing is being driven, so the two cannot fight over the key.
+      if (this.client.control?.joined === true) return;
+      e.preventDefault();
+      book.toggle();
+    });
+  }
+
+  /**
+   * Tell the server where the body actually is.
+   *
+   * The browser's local simulation integrates REAL SECONDS against the game's own extracted
+   * constants, so it is the thing that knows the right answer. The server's own movement
+   * command is applied per TICK, and this world runs at a 200/s target (about 145 in
+   * practice) against vanilla's 20 — measured on the dev replica, a one-second walk covered
+   * 4.17 blocks at 20 ticks and 16.70 at 200. Driving the body by position instead makes the
+   * distance travelled per real second the simulation's, whatever the tick rate is doing.
+   *
+   * Only while a fake player is joined: with nobody joined there is no body to place.
+   * Rate-limiting lives in the bridge, next to the RCON connection it protects.
+   */
+  private pushPosition(pos: readonly [number, number, number]): void {
+    if (this.client.control?.joined !== true) return;
+    // NEVER TELEPORT THE BOT OUT OF THE WORLD, whatever the local simulation believes.
+    //
+    // This is the guard that makes a bad fall survivable rather than terminal. The local
+    // body dropping below the build height is always a bug — it used to be a hitched frame
+    // sweeping it straight through the floor (see `moveAxis` in predict.ts) — and pushing
+    // that position on was what turned a client-side glitch into a server-side one: the bot
+    // ends up under the world, where nothing is solid, so nothing stops it and nothing
+    // reports it. Held back here, the bot stays where it was and the HUD says why, which
+    // leaves the walk recoverable and the cause visible.
+    if (pos[1] < this.deps.world.minY) {
+      this.deps.status('live: the local body is below the world — not moving the bot.'
+        + ' Press R to respawn it');
+      return;
+    }
+    this.client.send({ t: 'goto', x: pos[0], y: pos[1], z: pos[2] });
+  }
+
+  /**
+   * Point the listener where the camera is looking, once a frame.
+   *
+   * Taken from the camera rather than from the player body so that panning is right in
+   * every mode — fly, isometric and first person — since the camera is the only thing all
+   * three agree on. Also resets the per-frame sound budget.
+   */
+  private updateListener(): void {
+    if (!this.sound) return;
+    const cam = this.deps.viewer.camera;
+    // The camera's forward is the negated third column of its world matrix. Read straight
+    // out of the matrix rather than allocating a Vector3 every frame for one direction.
+    const m = cam.matrixWorld.elements;
+    this.sound.setListener(
+      [cam.position.x, cam.position.y, cam.position.z],
+      [-m[8], -m[9], -m[10]],
+    );
+  }
+
+  /**
+   * Bring up audio.
+   *
+   * The manifest loads immediately; the AudioContext cannot, because every browser refuses
+   * to start one until the user has interacted with the page — and refuses SILENTLY. So the
+   * context is created on the first click or keypress, and until then the HUD says audio is
+   * waiting rather than letting it look broken.
+   */
+  private async startSound(): Promise<void> {
+    const engine = new SoundEngine({ base: '/sounds', status: (m) => this.deps.status(m) });
+    if (!await engine.load()) return;
+    this.sound = engine;
+    const wake = () => {
+      void engine.resume().then(async () => {
+        // Warm what this world can actually make, BEFORE the first block breaks: a lazy
+        // cache alone means the first break of every material is silent.
+        // This world's own blocks first, with a couple of variants each, so the sounds
+        // most likely to happen are the ones ready soonest.
+        const events = eventsForPalette(this.physics, this.deps.world.palette);
+        await engine.preload(events);
+        this.deps.status(
+          `sound: ${engine.state}, ${events.length} events for this world`
+          + `, ${engine.stats.preloaded} files ready`);
+        // Then every block sound the game has, one variant each, in the background: a block
+        // can be placed that this world has never contained, and that first break was
+        // measurably being dropped.
+        const all = allBlockEvents(this.physics);
+        await engine.preload(all, 1, 6);
+        this.deps.status(`sound: ${engine.stats.preloaded} files ready (${all.length} events)`);
+      });
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
+    };
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
+  }
+
+  /**
+   * One block changed: play its break or place sound where it happened.
+   *
+   * The sound belongs to the block that LEFT on a break and the one that ARRIVED on a
+   * place — getting that backwards makes mining stone sound like air.
+   */
+  blockChanged(pos: readonly [number, number, number], oldKey: string | null, newKey: string | null): void {
+    if (!this.sound) return;
+    const ev = eventForChange(this.physics, oldKey, newKey);
+    if (!ev) return;
+    // Block centre, so the pan matches where the block visibly is.
+    this.sound.play(ev.event, [pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5],
+      { volume: ev.volume, pitch: ev.pitch });
+  }
+
+  /** Footsteps for the locally-simulated body, paced by distance walked. */
+  private stepSound(pos: readonly [number, number, number], onGround: boolean): void {
+    if (!this.sound) return;
+    if (!this.footsteps.update(pos, onGround)) return;
+    const below: [number, number, number] = [
+      Math.floor(pos[0]), Math.floor(pos[1] - 0.1), Math.floor(pos[2]),
+    ];
+    const id = this.deps.world.getState(below[0], below[1], below[2]);
+    const key = this.deps.world.palette[id];
+    if (!key) return;
+    const sound = soundFor(this.physics, key);
+    if (!sound?.stepSound) return;
+    // Vanilla plays footsteps well below the SoundType's nominal volume.
+    this.sound.play(sound.stepSound, pos, { volume: sound.volume * 0.3, pitch: sound.pitch });
+  }
+
+  /** Everything the spacetime path contributes, or nothing at all on the bridge path. */
+  private spacetimeLine(): string {
+    return (this.spacetime ? this.spacetime.hudLine() : '')
+      + (this.stTerrain ? this.stTerrain.hudLine() : '')
+      + (this.stNative ? this.stNative.hudLine() : '')
+      + this.unavailableLine();
+  }
+
+  /**
+   * What this mode genuinely cannot show, named on screen.
+   *
+   * The rule the whole source seam turns on: anything that cannot be served from the chosen
+   * source must be VISIBLY absent, never silently backfilled from the other one. Each of
+   * these is a property of the transport rather than unfinished work:
+   *
+   *   chat          the bridge reads it by tailing the server log; the Minecraft protocol
+   *                 does carry chat, but the module does not yet have a table for it
+   *   controls      the fake player is driven by RCON commands, which is a bridge facility
+   *   screen text   NOT on the network protocol at all, so no protocol client can ever see
+   *                 it — it comes from each computer's own `screen.json` in the save, which
+   *                 is a separate channel and is labelled as one rather than dressed up as
+   *                 a spacetime feed
+   */
+  private unavailableLine(): string {
+    if (!this.bridgeless) return '';
+    const screens = this.fileScreens.length;
+    return ' | NOT IN SPACETIME: chat, controls'
+      + ` | screens: ${screens} from screen.json (save file, not the protocol)`;
+  }
+
+  /** Which world source won, so the Join button can explain itself honestly. */
+  get sourceKind(): 'bridge' | 'spacetime' {
+    return this.source?.kind ?? 'bridge';
   }
 
   /** Set by the app so the Join button can re-render whenever the state moves. */
@@ -391,8 +855,43 @@ export class LiveView {
     this.screenFiles.start();
     // Read and draw the save's own entities (mobs, items, falling blocks) before connecting,
     // so they are on screen at load and the first flush's re-read has a baseline to diff.
-    await this.entities.start();
-    this.client.connect();
+    this.source = await loadSource();
+    this.deps.status(describeSource(this.source));
+    // The movement joystick: bottom LEFT, its own circle, pointer events so a trackpad
+    // drives it as well as a finger. The action pad owns the bottom right and the iso view
+    // owns a primary drag anywhere else, so none of the three can take another's press.
+    this.stick = new Joystick({
+      root: this.deps.hudRoot,
+      onChange: (v) => this.controls.setAnalog(v),
+    });
+    this.sourceToggle = new SourceToggle({ root: this.deps.hudRoot });
+    this.sourceToggle.setSource(this.source);
+    // The Join button's reason depends on the source, and in spacetime mode no control
+    // state will ever arrive to trigger a re-render — so push one now.
+    // A null control is exactly what the button needs to see in spacetime mode: it is the
+    // absence of a control channel, which is the true reason it is disabled.
+    this.onControlChange?.(this.client.control as never);
+    await this.startSound();
+    this.startRecipes();
+    void this.loadTags();
+    if (this.source.kind === 'spacetime') {
+      // THE BRIDGE IS NOT OPENED AT ALL in spacetime mode.
+      //
+      // Not "opened and ignored" — a bridge socket keeps polling the server and, worse,
+      // keeps the `save-all flush` running, so the viewer would still be leaning on the
+      // save files while claiming to be native. Everything the bridge used to supply is
+      // either served from the module (players, computers, terrain, light, entities) or is
+      // honestly absent and named as such on the HUD (chat, the fake player, monitor text).
+      await this.startSpacetime();
+    } else {
+      await this.entities.start();
+      this.client.connect();
+    }
+  }
+
+  /** True when no bridge socket exists, so callers do not send into a dead client. */
+  private get bridgeless(): boolean {
+    return this.source?.kind === 'spacetime';
   }
 
   // -------------------------------------------------------------------------
@@ -632,9 +1131,30 @@ export class LiveView {
   }
 
   /** Files win per panel; the bridge feed covers the rest. */
+  /**
+   * Choose a screen source, rather than merging two descriptions of the same wall.
+   *
+   * Two routes can describe the same panel: a computer's `screen.json` — a save file that
+   * lags and carries `lines` and nothing else — and the live feed. Merging them by position
+   * does not work, because they do not agree on the origin: the file route derives it by
+   * walking the monitor blocks around the computer, while the feed reports the panel's own
+   * origin block. Measured on the live server, that disagreement drew the MapServer log
+   * TWICE on one wall, offset by about fifteen rows.
+   *
+   * So when the feed is supplying panels with per-character colour it is used ALONE. It is a
+   * superset by construction — every panel on the server, from the protocol, with colours
+   * the save file cannot represent — and mixing in a lagged partial copy can only make the
+   * wall worse.
+   */
   private paintScreens(): void {
-    const seen = new Set(this.fileScreens.map((m) => `${m.x},${m.y},${m.z},${m.facing}`));
-    const rest = this.feedScreens.filter((m) => !seen.has(`${m.x},${m.y},${m.z},${m.facing}`));
+    const rich = this.feedScreens.some(hasCellColour);
+    if (rich) {
+      this.screens.update(this.feedScreens);
+      return;
+    }
+    const key = (m: LiveMonitor) => `${m.x},${m.y},${m.z},${m.facing}`;
+    const seen = new Set(this.fileScreens.map(key));
+    const rest = this.feedScreens.filter((m) => !seen.has(key(m)));
     this.screens.update([...this.fileScreens, ...rest]);
   }
 
@@ -737,6 +1257,7 @@ export class LiveView {
     this.updateFollow(poses);
     this.updateTurtles();
     this.entities.update();
+    this.updateListener();
   }
 
   /**
@@ -933,32 +1454,81 @@ export class LiveView {
    * "watching" and "playing" are the same page with the camera owned by different things.
    */
   updateCamera(dt: number): boolean {
-    // A device that claimed a fine pointer but is being driven by a finger reveals the pad
-    // the moment a real touch lands. `(pointer: coarse)` is a good guess and not a
-    // guarantee, and the cost of guessing wrong is a player with no mine button.
-    if (this.controls.diag.touches > 0 && this.controls.active && !this.pad.visible) {
-      this.pad.setVisible(true, true);
-      this.pad.setCrosshair(this.mode === 'first');
-    }
+    this.revealPadOnTouch();
     if (!this.controls.active && !this.iso.active) return false;
     // Owed look intents go out here rather than from the input handlers, so the last
     // fraction of a gesture is not lost to the throttle. Cheap and idempotent.
     this.controls.flushLook();
     if (!this.lastSample || !this.smoothed) return false;
-    const age = (performance.now() - this.lastSample.t) / 1000;
-    // Dead-reckon, but only for as long as a sample could plausibly still be in flight.
-    // Past that the server has gone quiet and coasting is a guess, not a prediction.
-    const lead = Math.min(age, MAX_EXTRAPOLATE_S);
-    const target: [number, number, number] = [
-      this.lastSample.pos[0] + this.velocity[0] * lead,
-      this.lastSample.pos[1] + this.velocity[1] * lead,
-      this.lastSample.pos[2] + this.velocity[2] * lead,
-    ];
+    const target = this.serverEstimate();
     const k = 1 - Math.exp(-CONVERGE_RATE * dt);
     for (let i = 0; i < 3; i++) this.smoothed[i] += (target[i] - this.smoothed[i]) * k;
-    if (this.iso.active) this.frameIso(this.smoothed);
-    else this.controls.setCameraTo(this.smoothed);
+    // `smoothed` is now the best estimate of where the server has us, and the thing the
+    // prediction is corrected TOWARD — not the thing drawn. Drawing it was the input lag.
+    if (!this.body.active) this.body.reset(this.smoothed);
+    // THE ORDER IS THE FIX. The isometric view decides what the body should do from where
+    // the body IS, the simulation is stepped with that, and only then is the camera placed
+    // at where it ENDED UP. This mode used to send `input` frames straight at the bridge
+    // and never touch the simulation at all — so the body stood still, and `pushPosition`
+    // below teleported the server's bot onto a position that was never going anywhere.
+    if (this.iso.active) this.iso.steer(this.body.position);
+    this.body.step(dt, this.activeIntent(), this.activeYaw());
+    this.body.reconcile(this.smoothed, dt);
+    const shown = this.body.position;
+    this.stepSound(shown, this.body.stats().onGround);
+    this.updateBreaking(dt);
+    this.pushPosition(shown);
+    if (this.iso.active) this.frameIso(shown);
+    else this.controls.setCameraTo(shown);
     return true;
+  }
+
+  /**
+   * Who is driving the body right now.
+   *
+   * Exactly one of the two input paths is bound at a time (`applyInputMode`), and this is
+   * the one place that says which — so the simulation, the speed calibration and the
+   * server's own copy of the movement can never be fed by different halves of the app.
+   */
+  private activeIntent(): PredictIntent {
+    return this.iso.active ? this.iso.intent() : this.controls.intent();
+  }
+
+  /** Which way "forward" is for whoever is driving. */
+  private activeYaw(): number {
+    return this.iso.active ? this.iso.walkYaw : this.controls.lookYaw;
+  }
+
+  /**
+   * A device that claimed a fine pointer but is being driven by a finger reveals the pad
+   * the moment a real touch lands. `(pointer: coarse)` is a good guess and not a guarantee,
+   * and the cost of guessing wrong is a player with no mine button.
+   */
+  private revealPadOnTouch(): void {
+    if (this.controls.diag.touches > 0 && this.controls.active && !this.pad.visible) {
+      this.pad.setVisible(true, true);
+      this.pad.setCrosshair(this.mode === 'first');
+    }
+  }
+
+  /**
+   * Where the SERVER most likely has us right now.
+   *
+   * Dead-reckoned from the newest sample along its measured velocity, but only for as long
+   * as a sample could plausibly still be in flight. Past that the server has gone quiet and
+   * coasting is a guess, not a prediction — so the estimate stops moving and the local body
+   * is reconciled toward a stationary point rather than being dragged off after a stale
+   * velocity.
+   */
+  private serverEstimate(): [number, number, number] {
+    const sample = this.lastSample!;
+    const age = (performance.now() - sample.t) / 1000;
+    const lead = Math.min(age, MAX_EXTRAPOLATE_S);
+    return [
+      sample.pos[0] + this.velocity[0] * lead,
+      sample.pos[1] + this.velocity[1] * lead,
+      sample.pos[2] + this.velocity[2] * lead,
+    ];
   }
 
   /**
@@ -972,7 +1542,9 @@ export class LiveView {
    */
   private frameIso(pos: [number, number, number]): void {
     if (this.selfKey) this.deps.viewer.setEntityTransform(this.selfKey, pos, this.selfYawDeg);
-    this.iso.update(pos);
+    // `frame`, not `update`: the steering for this frame already ran, before the body was
+    // stepped. All that is left is to put the camera on the result.
+    this.iso.frame(pos);
   }
 
   hudLine(): string {
@@ -983,6 +1555,9 @@ export class LiveView {
       + ` | ${this.playerLine()}`
       + this.turtleLine()
       + this.entities.hudLine()
+      + this.hands.hudLine()
+      + this.spacetimeLine()
+      + (this.sound ? this.sound.hudLine() : ' | sound: off')
       + (age === null ? '' : ` | flushed ${age.toFixed(0)}s ago (${c.flush?.lastDurationMs ?? 0}ms)`)
       + (this.stats.chunksChanged ? ` | ${this.stats.chunksChanged} chunks changed` : '')
       + (this.dirty.size ? ` | ${this.dirty.size} to re-mesh` : '')
@@ -1049,7 +1624,48 @@ export class LiveView {
       + ` fine=${yn(this.controls.pointerFine)} touch=${d.touches}`
       + ` keys=${this.controls.heldNames.join(',') || '-'}`
       + ` raw=${d.rawKeys} try=${d.tried} sent=${c.sent} drop=${c.dropped} ack=${ack}`
+      + this.predictLine()
       + (d.lockError ? ` | POINTER LOCK REFUSED: ${d.lockError}` : '');
+  }
+
+  /**
+   * What the local prediction is doing, and how far it disagrees with the server.
+   *
+   * `drift` is the number that matters. In steady state it sits near zero; it rises during
+   * the round trip after a keypress (that IS the hidden latency, made visible) and it stays
+   * risen if the local collision model is wrong about some block — which is the one failure
+   * mode of this whole feature and must not be silent. `phys=FALLBACK` says the extracted
+   * constants never loaded, so nobody mistakes guessed movement for the game's.
+   */
+  private predictLine(): string {
+    // The ISOMETRIC view counts too. This used to check only the first-person controls, so
+    // the one number that says whether the simulation and the server agree went blank in
+    // the mode where the character is being driven by a planner rather than by a hand on
+    // the keys — which is the mode where you can least afford to guess.
+    // WHO IS DRIVING, SAID OUT LOUD. When neither driver is bound, `updateCamera` returns false
+    // and main.ts falls through to `FlyControls` — a free-fly camera with NO COLLISION of any kind.
+    // That is correct for looking around a save file and indistinguishable, from the keyboard,
+    // from playing badly: "theres nothing preventing me from walking through walls in 1p" (the
+    // user, 2026-09-11), when the simulation that does the colliding was not driving at all. The
+    // body's own collision is sound -- a body walked into a wall stops at 65.700 against a wall at
+    // 66, exactly its half-width -- so the only question this line has to answer is which of the
+    // two is on, and a blank HUD answered it by omission.
+    if (!this.controls.active && !this.iso.active) return ' | camera: FREE-FLY (no collision)';
+    const p = this.body.stats();
+    const cov = this.physics ? 'exact' : 'heuristic';
+    return ` | drive=${this.iso.active ? 'iso' : '1p'} predict: drift=${p.drift.toFixed(2)}b`
+      + ` speed=${p.speed.toFixed(2)}${p.calibrations ? `(${p.calibrations})` : '(seed)'}`
+      + ` ground=${yn(p.onGround)}`
+      + (p.resyncs ? ` resync=${p.resyncs}` : '')
+      + ` phys=${p.measured ? 'game' : 'FALLBACK'}/${cov}`
+      // The server's clock, named when it disagrees with ours. This world runs a 200/s tick
+      // target and manages about 145 against vanilla's 20, so its idea of how far a player
+      // moves in a second is wrong — movement comes from the local simulation instead, and
+      // that has to be visible rather than a silent divergence.
+      + (p.serverPlausible
+        ? ''
+        : ` | SERVER CLOCK ${(p.serverSpeed / Math.max(p.speed, 0.01)).toFixed(1)}x`
+          + ' — movement is local, not reconciled');
   }
 }
 

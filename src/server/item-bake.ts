@@ -30,6 +30,85 @@ const MAX_PARENT_DEPTH = 8;
 interface ItemModel {
   parent?: string;
   textures?: Record<string, string>;
+  display?: Record<string, RawTransform>;
+}
+
+interface RawTransform {
+  rotation?: [number, number, number];
+  translation?: [number, number, number];
+  scale?: [number, number, number];
+}
+
+/**
+ * How an item is held, in the contexts the renderer draws.
+ *
+ * Vanilla positions a held item with the `display` block of its model — `rotation` in
+ * degrees, `translation` in sixteenths of a block, `scale` as a multiplier. Everything
+ * inherits it: a sword resolves through `item/handheld`, whose `thirdperson_righthand` rolls
+ * it 55 degrees, which is what makes a sword sit diagonally in a fist instead of flat. Most
+ * items resolve through `item/generated` instead, which only lifts and shrinks.
+ *
+ * Emitted as a PALETTE because the values are shared: 11,974 items in this pack resolve to a
+ * handful of distinct transforms, so storing one per item would be bytes wasted on repeats.
+ */
+export interface ItemTransform {
+  rotation: [number, number, number];
+  translation: [number, number, number];
+  scale: [number, number, number];
+}
+
+/** The display contexts worth carrying; the rest (gui, ground, fixed, head) are unused here. */
+export const HELD_CONTEXTS = [
+  'thirdperson_righthand', 'thirdperson_lefthand',
+  'firstperson_righthand', 'firstperson_lefthand',
+] as const;
+
+export type HeldContext = (typeof HELD_CONTEXTS)[number];
+
+const IDENTITY_TRANSFORM: ItemTransform = {
+  rotation: [0, 0, 0], translation: [0, 0, 0], scale: [1, 1, 1],
+};
+
+function normaliseTransform(raw: RawTransform | undefined): ItemTransform | null {
+  if (!raw) return null;
+  return {
+    rotation: raw.rotation ?? [0, 0, 0],
+    // Vanilla's translation is in sixteenths of a block; convert once, here, so no consumer
+    // has to remember the unit.
+    translation: (raw.translation ?? [0, 0, 0]).map((v) => v / 16) as [number, number, number],
+    scale: raw.scale ?? [1, 1, 1],
+  };
+}
+
+/**
+ * Every held transform an item resolves to, following `parent` exactly as the icon does.
+ *
+ * A child's `display` wins over its parent's per context, which is vanilla's merge rule —
+ * `item/handheld` overrides only the four hand contexts and inherits the rest from
+ * `item/generated`.
+ */
+export function resolveItemDisplay(pack: Pack, itemId: string): Partial<Record<HeldContext, ItemTransform>> {
+  const out: Partial<Record<HeldContext, ItemTransform>> = {};
+  let current: string | undefined = modelPathOf(itemId.replace(':', ':item/'));
+  for (let depth = 0; depth < MAX_PARENT_DEPTH && current; depth++) {
+    const model = readJson<ItemModel>(pack, current);
+    if (!model) break;
+    for (const ctx of HELD_CONTEXTS) {
+      if (out[ctx]) continue; // the nearest ancestor that defines it wins
+      const t = normaliseTransform(model.display?.[ctx]);
+      if (t) out[ctx] = t;
+    }
+    if (!model.parent) break;
+    current = modelPathOf(model.parent);
+  }
+  return out;
+}
+
+/** The transform for a context, or the identity when the item defines none. */
+export function heldTransform(
+  displays: Partial<Record<HeldContext, ItemTransform>> | undefined, ctx: HeldContext,
+): ItemTransform {
+  return displays?.[ctx] ?? IDENTITY_TRANSFORM;
 }
 
 export interface ItemIcon {
@@ -55,6 +134,15 @@ export interface BakedItems {
   /** item id -> how to draw it; see WireIcon */
   icons: Record<string, WireIcon>;
   missing: string[];
+  /**
+   * Held-item transforms, as a palette plus one index per item.
+   *
+   * `transforms` holds each distinct `{context: transform}` set once; `itemTransforms` maps
+   * an item id to its index, and an item absent from the map has no display block anywhere
+   * in its parent chain and is drawn untransformed.
+   */
+  transforms?: Array<Partial<Record<HeldContext, ItemTransform>>>;
+  itemTransforms?: Record<string, number>;
 }
 
 export function encodeIcon(id: string, icon: ItemIcon): WireIcon | null {
@@ -176,13 +264,46 @@ export function bakeItems(
     if (enc !== null) wire[id] = enc;
   }
 
+  const { transforms, itemTransforms } = bakeTransforms(pack, Object.keys(wire));
+
   return {
     meta: {
       version: 1,
       atlas: { width: atlas.width, height: atlas.height, sprites: atlas.sprites },
       icons: wire,
       missing: atlas.missing,
+      transforms,
+      itemTransforms,
     },
     png: atlas.png,
   };
+}
+
+/**
+ * Resolve every drawable item's held transforms, deduplicated into a palette.
+ *
+ * Deduplication is the whole point: practically every item in the pack inherits one of a
+ * handful of `display` blocks, so a per-item copy would be tens of thousands of identical
+ * objects for no gain.
+ */
+function bakeTransforms(pack: Pack, itemIds: string[]): {
+  transforms: Array<Partial<Record<HeldContext, ItemTransform>>>;
+  itemTransforms: Record<string, number>;
+} {
+  const transforms: Array<Partial<Record<HeldContext, ItemTransform>>> = [];
+  const index = new Map<string, number>();
+  const itemTransforms: Record<string, number> = {};
+  for (const id of itemIds) {
+    const display = resolveItemDisplay(pack, id);
+    if (!Object.keys(display).length) continue;
+    const key = JSON.stringify(display);
+    let i = index.get(key);
+    if (i === undefined) {
+      i = transforms.length;
+      transforms.push(display);
+      index.set(key, i);
+    }
+    itemTransforms[id] = i;
+  }
+  return { transforms, itemTransforms };
 }

@@ -37,3 +37,72 @@ test('all six faces of a model cube wind outward after orientOutward, normals ag
   }
   assert.ok(reversed > 0, 'vanilla corner order needs at least one face turned, or this test proves nothing');
 });
+
+// ---------------------------------------------------------------------------
+// Posing
+
+/**
+ * THE INVARIANT THAT MATTERS MOST for animation: posing with no rotation must reproduce the
+ * rest pose the viewer has always drawn, quad for quad and vertex for vertex.
+ *
+ * If it does not, every mob shifts the moment animation is switched on and the bug looks
+ * like "the animation is wrong" when it is actually the transform chain being rebuilt
+ * differently. Run against the REAL extracted models, not a fixture, because the part trees
+ * that matter are the ones with nested children (a cow's head under its body).
+ */
+import { readFileSync, existsSync } from 'node:fs';
+import {
+  buildEntityQuads, buildPosedParts, poseQuads, makeEntityModelSet,
+} from './entity-geometry.js';
+
+const MODELS = 'public/entity-models.json';
+const INDEX = 'public/entity-index.json';
+const haveModels = existsSync(MODELS) && existsSync(INDEX);
+
+/** Just enough atlas for the geometry path: it only asks whether the sprite exists. */
+const stubAtlas = { get: () => ({ u0: 0, v0: 0, u1: 1, v1: 1, frames: 1, frametime: 1 }) };
+
+test('posing with zero rotation reproduces the rest pose exactly', { skip: !haveModels }, () => {
+  const set = makeEntityModelSet(
+    JSON.parse(readFileSync(MODELS, 'utf8')),
+    JSON.parse(readFileSync(INDEX, 'utf8')),
+  );
+  // A handful with genuinely nested parts, so the parent-chain maths is exercised.
+  const types = ['minecraft:cow', 'minecraft:chicken', 'minecraft:spider', 'minecraft:creeper'];
+  let checked = 0;
+  for (const type of types) {
+    const flat = buildEntityQuads(set, type, stubAtlas as never);
+    const parts = buildPosedParts(set, type, stubAtlas as never);
+    if (!flat || !parts) continue;
+    const posed = poseQuads(parts, () => ({ x: 0, y: 0, z: 0 }));
+    assert.equal(posed.length, flat.length, `${type}: quad count changed`);
+    for (let i = 0; i < flat.length; i++) {
+      for (let v = 0; v < 12; v++) {
+        assert.ok(Math.abs(posed[i].positions[v] - flat[i].positions[v]) < 1e-6,
+          `${type}: quad ${i} vertex float ${v} moved (${posed[i].positions[v]} vs ${flat[i].positions[v]})`);
+      }
+    }
+    checked++;
+  }
+  assert.ok(checked > 0, 'no models were checked — are the extracted models present?');
+});
+
+test('a non-zero rotation actually moves the part it names, and only that part', { skip: !haveModels }, () => {
+  const set = makeEntityModelSet(
+    JSON.parse(readFileSync(MODELS, 'utf8')),
+    JSON.parse(readFileSync(INDEX, 'utf8')),
+  );
+  const parts = buildPosedParts(set, 'minecraft:cow', stubAtlas as never);
+  assert.ok(parts, 'no cow model');
+  const rest = poseQuads(parts, () => ({ x: 0, y: 0, z: 0 }));
+  const swung = poseQuads(parts, (p) => (p.role === 'limb' ? { x: 0.8, y: 0, z: 0 } : { x: 0, y: 0, z: 0 }));
+  assert.equal(rest.length, swung.length);
+  let moved = 0;
+  for (let i = 0; i < rest.length; i++) {
+    for (let v = 0; v < 12; v++) {
+      if (Math.abs(rest[i].positions[v] - swung[i].positions[v]) > 1e-6) { moved++; break; }
+    }
+  }
+  assert.ok(moved > 0, 'rotating the limbs moved nothing at all');
+  assert.ok(moved < rest.length, 'rotating the limbs moved EVERY quad — the body moved too');
+});

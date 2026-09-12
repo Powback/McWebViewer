@@ -26,7 +26,9 @@ import { canonicalStateKey } from '../core/chunk.js';
 import type { BakedQuad } from '../assets/model.js';
 import { DIR_VEC } from '../assets/model.js';
 import type { RenderableState } from './registry.js';
-import { facesInward, quadOutward, type StateSource } from './mesher.js';
+import {
+  facesInward, quadOutward, stillAnim, toSnorm8, toUnorm16, toUnorm8, type StateSource,
+} from './mesher.js';
 import type { SpriteRect, TextureAtlas } from './atlas.js';
 import type { LayerBuffers, Layer } from './mesher.js';
 
@@ -62,10 +64,21 @@ export const ENTITY_STRATEGY: Record<string, EntityStrategy> = {
   'minecraft:interaction': 'invisible',
   'minecraft:area_effect_cloud': 'invisible',
   'minecraft:fishing_bobber': 'invisible',
-  // Create's super glue and the Aeronautics discovery pins draw a small sprite/quad,
-  // not a model. Vanilla-equivalent handling would be a billboard; until we draw them
-  // they are honestly 'unhandled', not 'invisible'.
-  'create:super_glue': 'unhandled',
+  // These two were both filed 'unhandled' on the assumption that they draw "a small sprite
+  // or quad". Disassembling their renderers says otherwise, and they differ from each other:
+  //
+  //   create:super_glue          SuperGlueRenderer.shouldRender is `iconst_0; ireturn` — it
+  //                              returns false unconditionally. Create NEVER draws the glue
+  //                              entity; the highlight you see while holding glue comes from
+  //                              a different path entirely. So this is genuinely invisible.
+  //
+  //   aeronauticsdiscovery:pin   PinEntityRenderer.shouldRender is conditional: it draws only
+  //                              while the local player holds the mod's PIN_WAND, and it has a
+  //                              substantial render method behind that check. Nothing is drawn
+  //                              in ordinary viewing, which is what this viewer does — but it
+  //                              is conditional, not absent, so it stays 'unhandled' rather
+  //                              than being promoted to 'invisible'.
+  'create:super_glue': 'invisible',
   'simulated:honey_glue': 'unhandled',
   'aeronauticsdiscovery:pin': 'unhandled',
 };
@@ -332,10 +345,14 @@ function finishLayers(
     if (!b || !b.idx.length) continue;
     layers[k] = {
       positions: new Float32Array(b.pos),
-      normals: new Float32Array(b.nor),
-      uvs: new Float32Array(b.uv),
-      colors: new Float32Array(b.col),
+      // Narrowed exactly as section geometry is -- a contraption is ordinary blocks, and there is
+      // no reason for it to cost twice as much per vertex. See the note on toSnorm8.
+      normals: toSnorm8(b.nor),
+      uvs: toUnorm16(b.uv),
+      colors: toUnorm8(b.col),
       indices: new Uint32Array(b.idx),
+      // Block-set geometry (contraptions) is meshed from still frames; see stillAnim.
+      anim: stillAnim(b.pos.length / 3),
     };
   }
   return layers;

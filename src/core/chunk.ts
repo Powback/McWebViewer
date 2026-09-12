@@ -89,10 +89,128 @@ export function unpack(
   }
 }
 
-function bitsFor(paletteLen: number, min: number): number {
-  let b = min;
-  while (1 << b < paletteLen) b++;
+/**
+ * Bits per entry for a paletted container.
+ *
+ * Vanilla's `Strategy.calculateBitsForSerialization` has TWO cases and the second one is
+ * silent if you miss it. Up to 256 distinct states a section uses its own palette, at
+ * `ceillog2(palette length)` bits. Past 256 it is promoted to the GLOBAL palette, whose
+ * width is `ceillog2(registry size)` — the data still holds block-state ids, they are just
+ * written at a wider stride. A reader using only the first rule reads the right values from
+ * the wrong bit offsets and produces plausible rubbish rather than an error.
+ *
+ * The width cannot be derived from the file. The registry size is not in it, and the `data`
+ * array's length does not pin it either: 13, 14, 15 and 16 bits all pack 4096 entries into
+ * 1024 longs. It has to be supplied, which is what `setRegistrySizes` is for.
+ *
+ * Found by the mcspacetime world downloader, which had to implement the packing side and hit
+ * the rule from the other direction (2026-09-12).
+ */
+/**
+ * Global palette widths in bits, or 0 when the registry size has not been supplied.
+ *
+ * Zero means "use the naive rule and count it", which is all a caller with no registry size
+ * can do — and the count makes the cost visible instead of leaving it a rendering artifact
+ * nobody connects to a bit width.
+ */
+const globalBits = { blocks: 0, biomes: 0 };
+
+function ceilLog2(n: number): number {
+  let b = 0;
+  while (1 << b < n) b++;
   return b;
+}
+
+/**
+ * Tell the decoder how big the game's registries are, so promoted containers can be read.
+ *
+ * Takes REGISTRY SIZES — the number of distinct block states (344,003 on the reference
+ * server) and biomes — and stores `ceillog2` of each, because that is vanilla's formula.
+ * Either may be omitted; an omitted one keeps the naive rule and keeps counting.
+ */
+export function setRegistrySizes(sizes: { blockStates?: number; biomes?: number }): void {
+  globalBits.blocks = sizes.blockStates && sizes.blockStates > 1 ? ceilLog2(sizes.blockStates) : 0;
+  globalBits.biomes = sizes.biomes && sizes.biomes > 1 ? ceilLog2(sizes.biomes) : 0;
+}
+
+/** The widths currently in effect; 0 means unset. Exposed for tests and the HUD. */
+export function registryBits(): { blocks: number; biomes: number } {
+  return { ...globalBits };
+}
+
+/**
+ * Containers that were promoted to a global palette, and how many we could not read.
+ *
+ * `blocksPromoted` / `biomesPromoted` count every promoted container; the `*Unreadable`
+ * counts are the subset decoded with a guessed width because no registry size was supplied.
+ * Those are the ones that render as rubbish.
+ *
+ * `tooManyStates` is kept under its old name because the HUD reports it.
+ */
+export const paletteStats = {
+  tooManyStates: 0,
+  blocksPromoted: 0, blocksUnreadable: 0,
+  biomesPromoted: 0, biomesUnreadable: 0,
+};
+
+/**
+ * Vanilla's rule, for either container.
+ *
+ * `min` is the container's floor (4 bits for blocks, 1 for biomes) and `max` the widest the
+ * container's OWN palette may be (8 for blocks, 3 for biomes). Past that the container holds
+ * the same palette indices at the global palette's width.
+ *
+ * When no registry size has been supplied, the width is INFERRED rather than guessed — see
+ * `inferBits`. That matters because there is no offline source for a modded server's
+ * block-state registry size: the harness sees vanilla's 26,684 because it boots without
+ * mods, and the real figure (344,003 here) lives only in the server's own tables.
+ */
+function containerBits(
+  paletteLen: number, min: number, max: number, global: number,
+  data?: LongBits, entries?: number,
+): { bits: number; promoted: boolean; guessed: boolean } {
+  const own = Math.max(min, ceilLog2(paletteLen));
+  if (own <= max) return { bits: own, promoted: false, guessed: false };
+  if (global) return { bits: global, promoted: true, guessed: false };
+  const inferred = data && entries ? inferBits(data, entries, paletteLen, max) : null;
+  return { bits: inferred ?? own, promoted: true, guessed: inferred === null };
+}
+
+/**
+ * Work out a promoted container's width from the file itself.
+ *
+ * The `data` array's length narrows it: Minecraft never lets an entry straddle a long, so
+ * `longs = ceil(entries / floor(64 / bits))`, and that maps several widths onto the same
+ * length — 13, 14, 15 and 16 bits all pack 4096 entries into 1024 longs. It does NOT map all
+ * of them together though: 17..21 bits take 1366 longs, 22..32 take 2048. So the length
+ * gives a handful of candidates rather than one.
+ *
+ * The palette then picks between them. Every value in a promoted container is still an index
+ * into the section's own palette, so a candidate width that decodes any index past the end
+ * of the palette is wrong. With 4,096 entries and a palette of a few hundred, a wrong width
+ * misaligns almost immediately and is rejected; only when two candidates BOTH decode cleanly
+ * is the answer ambiguous, and then we decline rather than pick.
+ */
+export function inferBits(
+  data: LongBits, entries: number, paletteLen: number, minBits: number,
+): number | null {
+  const longs = data.length;
+  const fits: number[] = [];
+  for (let bits = minBits + 1; bits <= 32; bits++) {
+    const perLong = Math.floor(64 / bits);
+    if (perLong && Math.ceil(entries / perLong) === longs) fits.push(bits);
+  }
+  const ok = fits.filter((bits) => allInPalette(data, bits, entries, paletteLen));
+  return ok.length === 1 ? ok[0] : null;
+}
+
+function allInPalette(data: LongBits, bits: number, entries: number, paletteLen: number): boolean {
+  const perLong = Math.floor(64 / bits);
+  for (let i = 0; i < entries; i++) {
+    const v = data.getBitsAt(Math.floor(i / perLong), (i % perLong) * bits, bits);
+    if (v >= paletteLen) return false;
+  }
+  return true;
 }
 
 function readPalette(list: NbtList): BlockStateDef[] {
@@ -122,7 +240,15 @@ function readBlockStates(bsTag: NbtCompound | undefined): {
     palette = readPalette(bsTag.palette as NbtList);
     const data = bsTag.data;
     if (data instanceof LongBits && palette.length > 1) {
-      const bits = bitsFor(palette.length, 4);
+      // Over 256 distinct states vanilla promotes the section to the global palette and
+      // writes at ITS width, not this palette's. See containerBits.
+      const w = containerBits(palette.length, 4, 8, globalBits.blocks, data, SECTION_VOLUME);
+      if (w.promoted) {
+        paletteStats.tooManyStates++;
+        paletteStats.blocksPromoted++;
+        if (w.guessed) paletteStats.blocksUnreadable++;
+      }
+      const bits = w.bits;
       blockIndices = new Uint16Array(SECTION_VOLUME);
       unpack(data, bits, SECTION_VOLUME, blockIndices);
     }
@@ -141,9 +267,16 @@ function readBiomes(biomeTag: NbtCompound | undefined): {
     biomePalette = (biomeTag.palette as NbtList).map(String);
     const data = biomeTag.data;
     if (data instanceof LongBits && biomePalette.length > 1) {
-      const bits = bitsFor(biomePalette.length, 1);
+      // The SAME promotion rule, and its threshold is far lower: a biome container's own
+      // palette tops out at 3 bits, so NINE distinct biomes in one 4x4x4 container is
+      // already enough to promote it. Blocks need 257.
+      const w = containerBits(biomePalette.length, 1, 3, globalBits.biomes, data, 64);
+      if (w.promoted) {
+        paletteStats.biomesPromoted++;
+        if (w.guessed) paletteStats.biomesUnreadable++;
+      }
       biomeIndices = new Uint8Array(64);
-      unpack(data, bits, 64, biomeIndices);
+      unpack(data, w.bits, 64, biomeIndices);
     }
   }
   return { biomePalette, biomeIndices };

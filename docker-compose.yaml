@@ -16,6 +16,14 @@ services:
       # the four regions around the base at -480,63,64: the reach square spans x -560..-401 and
       # z -16..143, crossing the x=-512 and z=0 region seams (2026-09-05: "only plus coords render")
       MCWV_REGIONS: "${MCWV_REGIONS:-r.0.0.mca}"
+      # Which live pipeline the browser uses.
+      #   bridge    (default) RCON + save-file re-reads. Entities move at the flush rate.
+      #   spacetime ../mcspacetime's protocol client mirroring the world into SpacetimeDB.
+      #             Entities move at packet rate. Needs that bot running.
+      # A single tab can override either way with ?source=... — no restart needed for that.
+      MCWV_SOURCE: "${MCWV_SOURCE:-bridge}"
+      MCWV_STDB_URI: "${MCWV_STDB_URI:-http://mcspacetime.pow}"
+      MCWV_STDB_DB: "${MCWV_STDB_DB:-mcspacetime}"
       # Uncomment to serve only some mod jars. The full set is ~450 MB and the browser
       # fetches all of it on ?auto=1 — fine on a wired LAN, painful over the VPN.
       # MCWV_JARS: "create-1.21.1-6.0.10.jar,cc-tweaked-1.21.1-forge-1.119.0.jar"
@@ -25,6 +33,19 @@ services:
       - /Users/macback/Projects/minecraft-create121/data/mods:/data/mods:ro
       # Vanilla client jar: run `npm run fetch-assets` on the host first.
       - ./.cache:/data/client:ro
+      # THE BUNDLE IS MOUNTED, NOT BAKED IN — so a change is a rebuild of the bundle and
+      # nothing else. The image's last stage is `COPY --from=build /app/dist
+      # /usr/share/nginx/html` and nothing else in the container depends on the source, so
+      # a full `docker compose build` was ninety seconds of ceremony around a file copy.
+      # With this mount, `npm run watch` (vite build --watch) rebuilds into ./dist in a
+      # couple of seconds and nginx is already serving it — refresh the page and it is
+      # there. No image rebuild, no restart, same URL, same bridge, same nginx routes.
+      #
+      # THE CATCH, so nobody is surprised by it: ./dist is now load bearing. If it is
+      # missing or half written the site is missing or half written, and what the container
+      # serves is whatever is on disk rather than whatever was last built into the image.
+      # `npm run build` puts it right. Take this line out to go back to the baked bundle.
+      - ./dist:/usr/share/nginx/html:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mcwebviewer.rule=Host(`mcwebviewer.pow`)"

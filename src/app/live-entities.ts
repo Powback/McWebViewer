@@ -33,13 +33,25 @@ import type { Viewer } from '../render/viewer.js';
 import type { MeshContext, StateSource } from '../render/mesher.js';
 import { meshBlockSet, classifyEntity, type BlockSetMesh } from '../render/entities.js';
 import {
-  buildEntityQuads, entityYawDeg, meshEntityQuads,
-  type EntityMesh, type EntityModelSet,
+  buildEntityQuads, buildPosedParts, poseQuads, entityYawDeg, meshEntityQuads,
+  type EntityMesh, type EntityModelSet, type PosedPart,
 } from '../render/entity-geometry.js';
+import { MotionTracker, partRotation, NO_ROTATION } from '../render/entity-anim.js';
 import type { ItemIcons } from '../render/item-icons.js';
 import { NameTags } from '../render/name-tags.js';
 import type { TrackPose } from './player-tracks.js';
 import { EntityTracks, decodeEntities, type EntityPose, type EntitySample } from './entity-tracks.js';
+import {
+  DISPLAY_OFFSET, displayScale, spawnerDisplayOf, spinDegAt, tiltAndScale,
+} from '../render/spawner-display.js';
+import { sizeOf } from '../render/entity-sizes.js';
+import { armPartOf, handOffset, heldItemPosition } from '../render/mob-held-item.js';
+import { WorldItems } from '../render/world-items.js';
+import { AmbientParticles } from '../render/ambient-particles.js';
+import {
+  frameAppearance, isFramedMap, itemRotationDeg, pitchMesh, ITEM_LIFT_FROM_BOARD,
+  type FrameAppearance,
+} from '../render/item-frames.js';
 import { RegionWatcher, httpRangeFetch, regionCoords } from './region-sync.js';
 import { RegionFile } from '../core/region.js';
 
@@ -52,6 +64,10 @@ const MOB_HOLD_MS = 30000;
 /** Item billboard: height in blocks, how high it floats, and the bob. */
 const ITEM_SIZE = 0.55;
 const ITEM_LIFT = 0.35;
+/** A held item reads smaller than a dropped one — it is in a fist, not on the ground. */
+const HELD_ITEM_SIZE = 0.4;
+/** A framed item fills most of the frame's 10x10-pixel opening. */
+const FRAMED_ITEM_SIZE = 0.5;
 const ITEM_BOB = 0.11;
 const ITEM_BOB_MS = 1400;
 /** Fallback type-label billboard. */
@@ -264,17 +280,33 @@ export class LiveEntities {
   private itemTracks = new EntityTracks({ holdMs: ITEM_HOLD_MS });
   private meshDrawn = new Set<string>();
   private modelMeshes = new Map<string, EntityMesh | null>();
+  /** part trees per type, so a pose can be rebuilt without re-baking any cube */
+  private posedParts = new Map<string, PosedPart[] | null>();
+  /** one motion tracker per entity, so the gait has a phase that survives bursty samples */
+  private motion = new Map<string, MotionTracker>();
+  /** the last pose drawn per entity, so an unchanged pose costs nothing */
+  private posedMeshes = new Map<string, { key: string; mesh: EntityMesh }>();
   private blockMeshes = new Map<string, BlockSetMesh | null>();
+  /** one tilted+scaled mesh per mob type shown in a spawner cage */
+  private spawnerMeshes = new Map<string, EntityMesh | null>();
+  /** one mesh per item-frame appearance (state plus baked pitch) */
+  private frameMeshes = new Map<string, BlockSetMesh | null>();
   private billboards: Billboards;
+  /** held items, which unlike dropped ones have a real orientation */
+  private heldItems: WorldItems;
+  /** ambient block particles — torch smoke, campfire plumes, bubbles, spores */
+  private particles: AmbientParticles;
   private tags: NameTags;
   private tagsBroken = false;
   private started = false;
 
-  readonly stats = { entities: 0, items: 0, stale: 0 };
+  readonly stats = { entities: 0, items: 0, stale: 0, spawners: 0, held: 0, frames: 0 };
 
   constructor(private deps: LiveEntitiesDeps) {
     this.regions = new EntityRegions(deps.entityBase, deps.entityRegions);
     this.billboards = new Billboards(deps.viewer.scene);
+    this.heldItems = new WorldItems(deps.viewer.scene);
+    this.particles = new AmbientParticles(deps);
     this.tags = new NameTags(deps.viewer.scene, undefined, 1.0);
   }
 
@@ -296,6 +328,20 @@ export class LiveEntities {
     } catch (e) {
       this.deps.status(`live entities: refresh failed — ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * Feed a roster that did NOT come from the region files.
+   *
+   * The spacetime source (a real protocol client mirroring the server into SpacetimeDB)
+   * produces exactly the same `EntitySample`s at packet rate instead of at flush rate. It
+   * enters here so that everything downstream — interpolation, meshes, billboards, name
+   * tags — is the identical code in both modes. Swapping the source must not fork the
+   * renderer, or only one of the two paths stays correct.
+   */
+  ingestExternal(roster: EntitySample[]): void {
+    this.started = true;
+    this.ingest(roster);
   }
 
   private ingest(roster: EntitySample[]): void {
@@ -321,12 +367,22 @@ export class LiveEntities {
     const itemPoses = this.itemTracks.poses(now);
     const aliveMesh = new Set<string>();
     const aliveSprite = new Set<string>();
+    // Oriented world items have their own retain set: framed stacks and held stacks both
+    // live in `heldItems`, and sweeping one against the other's set deletes it the same
+    // frame it is placed.
+    const aliveHeld = new Set<string>();
     const named: EntityPose[] = [];
-    for (const p of entPoses) this.drawEntity(p, models, aliveMesh, aliveSprite, named);
+    this.stats.frames = 0;
+    for (const p of entPoses) this.drawEntity(p, models, aliveMesh, aliveSprite, aliveHeld, named);
     for (const p of itemPoses) this.drawItem(p, `save:${p.uuid}`, now, aliveSprite);
+    this.stats.spawners = this.drawSpawnerMobs(models, now, aliveMesh);
+    this.stats.held = 0;
+    for (const p of entPoses) this.stats.held += this.drawHeldItems(p, models, aliveHeld);
+    this.heldItems.retain(aliveHeld);
     this.retainMeshes(aliveMesh);
     this.billboards.retain(aliveSprite);
     this.updateTags(named);
+    this.particles.update(now);
     this.stats.entities = entPoses.length;
     this.stats.items = itemPoses.length;
     this.stats.stale = entPoses.filter((p) => p.stale).length;
@@ -337,6 +393,7 @@ export class LiveEntities {
     models: EntityModelSet | null,
     aliveMesh: Set<string>,
     aliveSprite: Set<string>,
+    aliveHeld: Set<string>,
     named: EntityPose[],
   ): void {
     const key = `save:${p.uuid}`;
@@ -347,8 +404,8 @@ export class LiveEntities {
     } else if (kind === 'block' && p.block && this.drawBlock(key, p)) {
       aliveMesh.add(key);
       if (p.name) named.push(p);
-    } else if (kind === 'itemframe' && p.item) {
-      this.drawItem(p, key, 0, aliveSprite);
+    } else if (kind === 'itemframe') {
+      this.drawItemFrame(p, key, aliveMesh, aliveHeld);
     } else {
       this.billboards.place(key, `label:${p.type}`, labelCanvas(shortName(p.type)),
         [p.pos[0], p.pos[1] + LABEL_LIFT, p.pos[2]], LABEL_SIZE);
@@ -357,10 +414,90 @@ export class LiveEntities {
   }
 
   private drawModel(key: string, p: EntityPose, models: EntityModelSet | null): boolean {
-    const mesh = this.modelMesh(p.type, models);
+    const mesh = this.animatedMesh(key, p, models) ?? this.modelMesh(p, models);
     if (!mesh) return false;
     this.placeMesh(key, mesh.layers, p.pos, entityYawDeg(p.yawDeg));
     return true;
+  }
+
+  /**
+   * A mesh posed for THIS entity's current gait, or null to fall back to the shared rest
+   * pose.
+   *
+   * Per-entity rather than per-type, because two cows are rarely mid-stride together — but
+   * the pose is QUANTISED and the mesh cached against it, so a mob that is standing still
+   * (by far the common case) rebuilds nothing and a walking one rebuilds only when its limbs
+   * have actually moved a visible amount. A mob whose model has no animatable part is left
+   * on the shared mesh entirely.
+   */
+  private animatedMesh(
+    key: string, p: EntityPose, models: EntityModelSet | null,
+  ): EntityMesh | null {
+    const parts = this.partsFor(p, models);
+    if (!parts) return null;
+    let tracker = this.motion.get(key);
+    if (!tracker) { tracker = new MotionTracker(); this.motion.set(key, tracker); }
+    const now = performance.now();
+    tracker.update(p.pos, now);
+    const state = tracker.state(now / 1000, 0, 0);
+    // Nothing to draw differently: a still mob IS its rest pose, so share it.
+    if (state.speed < 0.05) return null;
+
+    const rots = new Map<string, { x: number; y: number; z: number }>();
+    const poseKey = this.poseKeyFor(parts, state, rots);
+    const cached = this.posedMeshes.get(key);
+    if (cached && cached.key === poseKey) return cached.mesh;
+
+    const ctx = this.deps.getContext();
+    if (!ctx) return null;
+    const quads = poseQuads(parts, (part) => rots.get(part.name) ?? NO_ROTATION);
+    const mesh = meshEntityQuads(quads, ctx.atlas);
+    if (!mesh.quadCount) return null;
+    this.posedMeshes.set(key, { key: poseKey, mesh });
+    // The geometry changed, not just the transform, so it has to be re-added.
+    this.meshDrawn.delete(key);
+    return mesh;
+  }
+
+  /**
+   * The quantised pose, as a string, and the rotations that produced it.
+   *
+   * Quantising is what keeps this affordable: without it every frame is a new pose and every
+   * frame rebuilds the mesh. A twentieth of a radian is well under what the eye resolves on a
+   * limb at any distance you can see one.
+   */
+  private poseKeyFor(
+    parts: readonly PosedPart[],
+    state: ReturnType<MotionTracker['state']>,
+    into: Map<string, { x: number; y: number; z: number }>,
+  ): string {
+    const bits: string[] = [];
+    const walk = (list: readonly PosedPart[]): void => {
+      for (const part of list) {
+        const r = partRotation(part.role, state);
+        into.set(part.name, r);
+        if (part.role !== 'static') {
+          bits.push(`${part.name}:${q(r.x)},${q(r.y)},${q(r.z)}`);
+        }
+        if (part.children.length) walk(part.children);
+      }
+    };
+    walk(parts);
+    return bits.join('|');
+  }
+
+  /** The part tree for a type, baked once. */
+  private partsFor(p: EntityPose, models: EntityModelSet | null): PosedPart[] | null {
+    const cacheKey = p.appearance.key || p.type;
+    const hit = this.posedParts.get(cacheKey);
+    if (hit !== undefined) return hit;
+    const ctx = this.deps.getContext();
+    if (!ctx || !models) return null; // not ready — retry next frame, do not cache
+    const parts = buildPosedParts(models, p.type, ctx.atlas, p.appearance);
+    // A model with nothing to animate is cached as null so it never costs anything again.
+    const usable = parts && parts.some(hasAnimatable) ? parts : null;
+    this.posedParts.set(cacheKey, usable);
+    return usable;
   }
 
   private drawBlock(key: string, p: EntityPose): boolean {
@@ -368,6 +505,94 @@ export class LiveEntities {
     if (!mesh) return false;
     this.placeMesh(key, mesh.layers, p.pos, 0);
     return true;
+  }
+
+  /**
+   * What a mob is carrying, at its hand.
+   *
+   * Measured: 30 of this world's 801 entities hold something — 23 bows, 4 golden swords,
+   * 3 crossbows, all in the main hand. It rides the billboard path dropped items already
+   * use, because the item atlas is canvas-backed rather than part of the block atlas, and
+   * because a camera-facing sprite is the honest choice while the bake carries no
+   * `thirdperson_righthand` transform to orient it by. See render/mob-held-item.ts.
+   */
+  private drawHeldItems(
+    p: EntityPose, models: EntityModelSet | null, aliveHeld: Set<string>,
+  ): number {
+    const held = p.held;
+    if (!held.length || !models) return 0;
+    const geom = models.geometryFor(p.type);
+    if (!geom) return 0;
+    let drawn = 0;
+    const icons = this.deps.getIcons();
+    const yaw = entityYawDeg(p.yawDeg);
+    for (const item of held) {
+      const hand = item.slot === 0 ? 'right' : 'left';
+      // The item model's own held transform, from its `display` block — applied in full,
+      // rotation included, because a held item is real oriented geometry rather than a
+      // camera-facing sprite. `item/handheld` rolls a sword 55 degrees, and that roll is the
+      // difference between a sword in a fist and a sword lying flat in mid-air.
+      const t = icons?.transformFor(item.id, hand === 'left'
+        ? 'thirdperson_lefthand' : 'thirdperson_righthand');
+      const offset = handOffset(armPartOf(geom.model.parts, hand), hand, t?.translation);
+      if (!offset) continue; // a model with no arm holds nothing, as vanilla does
+      const icon = icons?.get(item.id) ?? null;
+      if (!icon) continue;
+      const key = `held:${p.uuid}:${item.slot}`;
+      this.heldItems.place(key, `item:${item.id}`, icon,
+        heldItemPosition(p.pos, yaw, offset), HELD_ITEM_SIZE * (t?.scale[0] ?? 1),
+        yaw, t?.rotation ?? [0, 0, 0]);
+      aliveHeld.add(key);
+      drawn++;
+    }
+    return drawn;
+  }
+
+  /**
+   * An item frame: its BLOCK model, plus the stack it holds standing off the board.
+   *
+   * The frame has no `EntityModel` and never needed one — vanilla draws it with
+   * `renderSingleBlock` on `block/item_frame`, which is a model this renderer already bakes.
+   * See render/item-frames.ts for the orientation and for what this world does and does not
+   * contain.
+   */
+  private drawItemFrame(
+    p: EntityPose, key: string, aliveMesh: Set<string>, aliveHeld: Set<string>,
+  ): void {
+    const look = frameAppearance(p.facing ?? 3, isFramedMap(p.item?.id), p.type.includes('glow'));
+    const mesh = this.frameMesh(look);
+    if (mesh) {
+      this.placeMesh(key, mesh.layers, p.pos, look.yawDeg);
+      aliveMesh.add(key);
+      this.stats.frames++;
+    }
+    if (!p.item) return;
+    // The stack, lifted just clear of the backing board so it does not z-fight it, and
+    // turned by the frame's own `ItemRotation`. Drawn through the oriented world-item path
+    // rather than the sprite one: a framed item faces the way the frame does.
+    const icons = this.deps.getIcons();
+    const icon = icons?.get(p.item.id) ?? null;
+    if (!icon) return;
+    const pos = heldItemPosition(p.pos, look.yawDeg, [0, 0, ITEM_LIFT_FROM_BOARD]);
+    this.heldItems.place(`${key}:item`, `item:${p.item.id}`, icon, pos, FRAMED_ITEM_SIZE,
+      look.yawDeg, [look.pitchDeg, 0, itemRotationDeg(p.rotation)]);
+    aliveHeld.add(`${key}:item`);
+  }
+
+  /** One mesh per frame appearance — every south-facing frame shares it. */
+  private frameMesh(look: FrameAppearance): BlockSetMesh | null {
+    const cacheKey = `${look.stateKey}|${look.pitchDeg}`;
+    const hit = this.frameMeshes.get(cacheKey);
+    if (hit !== undefined) return hit;
+    const ctx = this.deps.getContext();
+    const states = this.deps.getStates();
+    if (!ctx || !states) return null; // not ready — retry next frame, do not cache
+    // Centred on the origin so the entity position means the frame's centre, as it does in
+    // the save: a frame at TileZ 120 sits at z 120.03, a thirty-second of a block proud.
+    const mesh = meshBlockSet([{ x: -0.5, y: -0.5, z: -0.5, stateKey: look.stateKey }], states, ctx.atlas);
+    const usable = mesh.quadCount ? pitchMesh(mesh, look.pitchDeg) : null;
+    this.frameMeshes.set(cacheKey, usable);
+    return usable;
   }
 
   /** Draw one item / item-frame stack as its baked icon, bobbing when `bobMs` is non-zero. */
@@ -383,6 +608,51 @@ export class LiveEntities {
     aliveSprite.add(key);
   }
 
+  /**
+   * The mob turning inside every spawner cage in the loaded world.
+   *
+   * It rides this loop rather than the section mesher because it TURNS: the geometry is
+   * constant per mob type and only the placement angle changes, so one mesh per type is
+   * shared by every cage showing that mob and each cage costs one transform a frame. See
+   * render/spawner-display.ts for the transform, which is vanilla's disassembled.
+   */
+  private drawSpawnerMobs(
+    models: EntityModelSet | null, now: number, alive: Set<string>,
+  ): number {
+    const ctx = this.deps.getContext();
+    if (!ctx || !models) return 0;
+    let drawn = 0;
+    for (const col of ctx.world.chunks.values()) {
+      for (const be of col.blockEntities.values()) {
+        const d = spawnerDisplayOf(be as Record<string, unknown>);
+        if (!d) continue;
+        const mesh = this.spawnerMesh(d.type, models, ctx);
+        if (!mesh) continue;
+        const key = `spawner:${d.x},${d.y},${d.z}`;
+        this.placeMesh(key, mesh.layers, [
+          d.x + DISPLAY_OFFSET[0], d.y + DISPLAY_OFFSET[1], d.z + DISPLAY_OFFSET[2],
+        ], spinDegAt(d, now));
+        alive.add(key);
+        drawn++;
+      }
+    }
+    return drawn;
+  }
+
+  /** One tilted, scaled mesh per mob type — every cage showing a skeleton shares it. */
+  private spawnerMesh(
+    type: string, models: EntityModelSet, ctx: MeshContext,
+  ): EntityMesh | null {
+    const hit = this.spawnerMeshes.get(type);
+    if (hit !== undefined) return hit;
+    const quads = buildEntityQuads(models, type, ctx.atlas);
+    const scaled = quads ? tiltAndScale(quads, displayScale(sizeOf(type))) : null;
+    const mesh = scaled ? meshEntityQuads(scaled, ctx.atlas) : null;
+    const usable = mesh && mesh.quadCount ? mesh : null;
+    this.spawnerMeshes.set(type, usable);
+    return usable;
+  }
+
   private placeMesh(key: string, layers: EntityMesh['layers'], pos: readonly [number, number, number], yaw: number): void {
     if (this.meshDrawn.has(key)) {
       this.deps.viewer.setEntityTransform(key, pos, yaw);
@@ -395,15 +665,19 @@ export class LiveEntities {
   }
 
   /** Per-type mesh from the extraction, built once against the current atlas. */
-  private modelMesh(type: string, models: EntityModelSet | null): EntityMesh | null {
-    const hit = this.modelMeshes.get(type);
+  private modelMesh(p: EntityPose, models: EntityModelSet | null): EntityMesh | null {
+    // Keyed by APPEARANCE, not by type: a white sheep and a black one are the same model
+    // and must not share a mesh. `appearance.key` is '' for a mob with nothing special
+    // about it, so the ordinary case still meshes once for the whole world.
+    const cacheKey = p.appearance.key || p.type;
+    const hit = this.modelMeshes.get(cacheKey);
     if (hit !== undefined) return hit;
     const ctx = this.deps.getContext();
     if (!ctx || !models) return null; // not ready — retry next frame, do not cache
-    const quads = buildEntityQuads(models, type, ctx.atlas);
+    const quads = buildEntityQuads(models, p.type, ctx.atlas, p.appearance);
     const mesh = quads ? meshEntityQuads(quads, ctx.atlas) : null;
     const usable = mesh && mesh.quadCount ? mesh : null;
-    this.modelMeshes.set(type, usable);
+    this.modelMeshes.set(cacheKey, usable);
     return usable;
   }
 
@@ -448,8 +722,15 @@ export class LiveEntities {
     for (const key of this.meshDrawn) this.deps.viewer.removeSection(key);
     this.meshDrawn.clear();
     this.modelMeshes.clear();
+    this.spawnerMeshes.clear();
+    this.frameMeshes.clear();
+    this.posedParts.clear();
+    this.posedMeshes.clear();
+    this.motion.clear();
     this.blockMeshes.clear();
     this.billboards.clear();
+    this.heldItems.clear();
+    this.particles.clear();
     this.tags.clear();
   }
 
@@ -457,6 +738,20 @@ export class LiveEntities {
     const s = this.stats;
     if (!s.entities && !s.items) return '';
     return ` | ${s.entities} entities, ${s.items} items live`
-      + (s.stale ? ` (${s.stale} STALE)` : '');
+      + (s.stale ? ` (${s.stale} STALE)` : '')
+      + (s.spawners ? ` | ${s.spawners} spawner mobs` : '')
+      + (s.held ? ` | ${s.held} held` : '')
+      + (s.frames ? ` | ${s.frames} frames` : '')
+      + (this.particles.hud());
   }
+}
+
+/** A twentieth of a radian — below what the eye resolves on a limb. */
+function q(v: number): number {
+  return Math.round(v * 20);
+}
+
+/** Does this part, or any of its descendants, animate at all? */
+function hasAnimatable(part: PosedPart): boolean {
+  return part.role !== 'static' || part.children.some(hasAnimatable);
 }

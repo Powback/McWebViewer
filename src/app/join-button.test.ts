@@ -107,3 +107,36 @@ test('pressing the button hands the keyboard back', () => {
   assert.equal(blurred, true, 'space must reach the game, not re-press this button');
   assert.equal(button.disabled, true, 'and a double-tap must not send two joins');
 });
+
+// ---------------------------------------------------------------------------
+// Spacetime mode has no control channel at all.
+
+test('in spacetime mode the button says WHY, instead of claiming to connect', () => {
+  // SpacetimeDB is a read-only mirror of the world: it carries chunks, light, entities and
+  // players, and has no channel for sending input back. Control exists only through the
+  // bridge, which that mode deliberately does not open — so `control` stays null forever.
+  // The old text ("connecting to the bridge...") was a lie twice: nothing is connecting,
+  // and nothing ever will.
+  const v = buttonState(null, true, 'spacetime');
+  assert.equal(v.disabled, true, 'there really is no control channel, so it stays disabled');
+  assert.doesNotMatch(v.why, /connecting/i, 'it must not claim to be connecting');
+  assert.match(v.why, /read-only|view only/i);
+  assert.match(v.why, /bridge/i, 'and it must say what WOULD work');
+});
+
+test('bridge mode is unchanged — a null control really is still connecting', () => {
+  const v = buttonState(null, true, 'bridge');
+  assert.match(v.why, /connecting/i);
+  assert.equal(v.disabled, true);
+});
+
+test('the source only decides the NULL case; a real control state wins either way', () => {
+  // If a control channel ever does exist alongside spacetime, the button must reflect it
+  // rather than keep insisting the mode cannot play.
+  const joined = {
+    enabled: true, available: true, joined: true, reason: '', name: 'WebViewer',
+  };
+  const v = buttonState(joined, true, 'spacetime');
+  assert.equal(v.disabled, false);
+  assert.match(v.label, /Leave/);
+});

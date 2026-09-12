@@ -28,6 +28,10 @@
 
 import { shortestArc } from './player-tracks.js';
 import { canonicalStateKey } from '../core/chunk.js';
+import {
+  appearanceOf, type AppearanceContext, type EntityAppearance,
+} from '../render/entity-layers.js';
+import { heldItemsOf, type HeldItem } from '../render/mob-held-item.js';
 import type { NbtCompound, NbtList, NbtValue } from '../core/nbt.js';
 
 /** One entity as the renderer wants it, decoded out of an `entities/` chunk. */
@@ -45,6 +49,18 @@ export interface EntitySample {
   item: { id: string; count: number } | null;
   /** canonical block state a `falling_block` / `block_display` carries, or null */
   block: string | null;
+  /**
+   * Secondary layers this entity's own NBT calls for — a sheep's wool and its colour, a
+   * horse's coat, a wolf's variant. `appearance.key` is `''` for an entity with nothing
+   * special about it, which keeps the common case on the shared per-type mesh.
+   */
+  appearance: EntityAppearance;
+  /** what this mob is carrying, main hand first; empty for almost every entity */
+  held: readonly HeldItem[];
+  /** an item frame's `Facing` (a Direction ordinal), or null for anything else */
+  facing: number | null;
+  /** an item frame's `ItemRotation`, 0..7 in 45-degree steps */
+  rotation: number | null;
 }
 
 /** What to draw this frame: a sample whose position/yaw are the eased ones. */
@@ -131,7 +147,36 @@ function decodeEntity(ent: NbtCompound): EntitySample | null {
     name: readName(ent.CustomName),
     item: readItem(ent.Item),
     block: readBlockState(ent.BlockState),
+    appearance: appearanceOf(type, ent as Record<string, unknown>, appearanceCtx),
+    held: heldItemsOf(ent as Record<string, unknown>),
+    facing: typeof ent.Facing === 'number' ? ent.Facing : null,
+    rotation: typeof ent.ItemRotation === 'number' ? ent.ItemRotation : null,
   };
+}
+
+/**
+ * Where the datapack variant tables come from at runtime.
+ *
+ * Installed by whoever loads the baked bundle, because the browser has no packs of its own.
+ * Left unset, every appearance rule that needs one (only the wolf's coat today) simply does
+ * not fire, which is the pre-existing behaviour rather than a broken one.
+ */
+const appearanceCtx: AppearanceContext = {};
+
+export function useEntityVariants(
+  tables: Record<string, Record<string, Record<string, unknown>>> | undefined,
+): void {
+  appearanceCtx.variant = tables
+    ? (registry, id) => tables[registry]?.[id] ?? null
+    : undefined;
+  appearanceCtx.variantIds = tables
+    ? (registry) => Object.keys(tables[registry] ?? {})
+    : undefined;
+}
+
+/** The variant context, for callers that need to resolve a default coat. */
+export function entityAppearanceContext(): AppearanceContext {
+  return appearanceCtx;
 }
 
 /** Every drawable entity in one decoded `entities/` chunk root. */
@@ -236,6 +281,10 @@ export class EntityTracks {
         name: tr.sample.name,
         item: tr.sample.item,
         block: tr.sample.block,
+        appearance: tr.sample.appearance,
+        held: tr.sample.held,
+        facing: tr.sample.facing,
+        rotation: tr.sample.rotation,
         pos: [...tr.drawn] as [number, number, number],
         yawDeg: tr.drawnYaw,
         stale: tr.lostAt !== null,

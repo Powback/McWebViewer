@@ -26,6 +26,22 @@ export interface StoredSection {
   biomeUniform: number;
 }
 
+/**
+ * One live section's contents.
+ *
+ * An options object rather than positional arguments because light is optional and
+ * meaningfully so — see the note in `addLiveSection` about null versus zero.
+ */
+export interface LiveSection {
+  /** per-section string palette; index 0 must be air */
+  palette: string[];
+  /** 4096 indices into `palette` */
+  indices: Uint16Array;
+  /** 2048 bytes, one nibble per cell, low nibble first; omit when not known */
+  blockLight?: Int8Array | null;
+  skyLight?: Int8Array | null;
+}
+
 export interface ChunkColumn {
   x: number;
   z: number;
@@ -86,9 +102,9 @@ export class World {
     cx: number,
     cy: number,
     cz: number,
-    palette: string[],
-    indices: Uint16Array,
+    section: LiveSection,
   ): ChunkColumn {
+    const { palette, indices } = section;
     let col = this.chunks.get(chunkKey(cx, cz));
     if (!col) {
       col = {
@@ -113,10 +129,14 @@ export class World {
       y: cy,
       ids,
       uniform: AIR_ID,
-      // The protocol does not give us the light arrays in a form we read yet, so live
-      // mode renders fully lit rather than pitch black. Documented, not silent.
-      blockLight: null,
-      skyLight: null,
+      // NULL MEANS "NOBODY HAS TOLD US", NOT "DARK".
+      //
+      // `getLight` reads a null sky array as 15, i.e. fully lit, which is the right fallback
+      // for a section whose light has not arrived: the alternative is a world that blacks out
+      // every time a chunk beats its light packet. A section the server says is genuinely
+      // dark arrives as an array of ZEROES, which is a different thing and renders dark.
+      blockLight: section.blockLight ?? null,
+      skyLight: section.skyLight ?? null,
       biomeIds: null,
       biomeUniform: 0,
     });

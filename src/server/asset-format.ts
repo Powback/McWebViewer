@@ -85,6 +85,37 @@ export interface BakedAssets {
    */
   entityTypes?: string[];
   /**
+   * Datapack-driven entity variants, as `<registry>` -> `<id>` -> the variant's own JSON.
+   * Currently `wolf_variant`, whose entries name the wild / tame / angry coat texture.
+   *
+   * Baked rather than read at runtime because the browser has no packs — a served world is
+   * the bundle and the atlas, nothing else. And it cannot be derived from the variant name:
+   * `minecraft:pale`'s wild texture is `entity/wolf/wolf`, not `wolf_pale`, so the obvious
+   * convention breaks on vanilla's own default before any mod gets involved.
+   *
+   * Optional, like `entityTypes`: a bundle written before this field still loads, it just
+   * draws every wolf in the pale coat as before.
+   */
+  entityVariants?: Record<string, Record<string, Record<string, unknown>>>;
+  /**
+   * Sizes of the game's registries, for the paletted-container promotion rule.
+   *
+   * A section whose own palette outgrows its width limit is written at the GLOBAL palette's
+   * width instead, and that width is `ceillog2(registry size)` — a number that is nowhere in
+   * the save file. See `core/chunk.ts`. `biomes` is counted from the packs' own
+   * `worldgen/biome` definitions; `blockStates` has no offline source in bridge mode and is
+   * usually absent, which `paletteStats` then counts rather than hides.
+   */
+  registrySizes?: { blockStates?: number; biomes?: number };
+  /**
+   * Every entity type's collision box, extracted from the running game.
+   *
+   * A spawner scales the mob in its cage by `0.53125 / max(w, h)` when that exceeds 1, so
+   * drawing it at the right size needs the real box rather than the model's drawn extent.
+   * Travels in the bundle because it is asset-shaped data the renderer needs per frame.
+   */
+  entitySizes?: Record<string, { w: number; h: number }>;
+  /**
    * Hash of atlas.png as written next to this JSON. The client fetches the PNG as
    * `atlas.png?v=<hash>`, so a bundle and its atlas can never be paired across a re-bake
    * by an HTTP cache that expired one and not the other — sprite rects move between bakes.

@@ -44,6 +44,8 @@ export interface StateSource {
 export interface TintLookup {
   tint(biomeId: string, source: 0 | 1 | 2): readonly [number, number, number];
 }
+import { cornerHeights, fluidOf, fluidQuads, holdsFluid, type FluidCell } from './fluids.js';
+import { retextureQuads, textureMapOf } from './retexture.js';
 import { AIR_ID, World, type StoredSection } from './world.js';
 import { SECTION_VOLUME } from '../core/chunk.js';
 
@@ -53,10 +55,26 @@ export type Layer = 'solid' | 'cutout' | 'translucent';
 
 export interface LayerBuffers {
   positions: Float32Array;
-  normals: Float32Array;
-  uvs: Float32Array;
-  colors: Float32Array;
+  /** unit vectors as normalized int8: 3 bytes instead of 12, exact for axis-aligned faces */
+  normals: Int8Array;
+  /** atlas coordinates as normalized uint16: 4 bytes instead of 8 */
+  uvs: Uint16Array;
+  /** lighting x shade x AO x tint as normalized uint8: 4 bytes instead of 16 */
+  colors: Uint8Array;
   indices: Uint32Array;
+  /**
+   * Per-vertex animation: `(frames, frametimeTicks, vStep)`.
+   *
+   * A vanilla animated texture is a vertical strip of frames in the atlas, and the mesher
+   * already maps into frame 0's rect — so scrolling is just `uv.y += frame * vStep`, done in
+   * the vertex shader against a clock uniform. Carrying it per vertex rather than per
+   * material is what keeps ONE draw call per layer: a chunk mixes still stone with animated
+   * lava and a Create belt, and splitting materials per sprite would multiply the draw calls
+   * by the number of animated textures on screen.
+   *
+   * `frames === 1` (every still texture) makes the shader term exactly zero.
+   */
+  anim: Float32Array;
   /** present only in shaderpack mode; see ShaderAttribs */
   shader?: ShaderAttribs;
 }
@@ -98,11 +116,25 @@ const SHADE: Record<Direction, number> = {
 
 /** One quad's worth of input to LayerBuilder, grouped so the call stays under the
  * parameter limit and so shaderpack-only fields can be absent without a signature change. */
+/**
+ * A still `anim` buffer for geometry that never animates (entity models, block sets).
+ *
+ * `frames = 1` makes the shader's frame term exactly zero, so these share the same material
+ * and the same single draw call as animated geometry rather than needing a second program.
+ */
+export function stillAnim(vertexCount: number): Float32Array {
+  const out = new Float32Array(vertexCount * 3);
+  for (let i = 0; i < vertexCount; i++) out[i * 3] = 1;
+  return out;
+}
+
 interface QuadInput {
   p: Float32Array;
   n: [number, number, number];
   uvs: Float32Array;
   rgba: Float32Array;
+  /** `(frames, frametimeTicks, vStep)` — see LayerBuffers.anim */
+  anim: readonly [number, number, number];
   flipDiagonal: boolean;
   /** Which way this face points out of the block — see quadOutward(). */
   outward: readonly [number, number, number];
@@ -125,15 +157,17 @@ class LayerBuilder {
   lm: number[] = [];
   ent: number[] = [];
   mid: number[] = [];
+  anim: number[] = [];
   vertices = 0;
 
-  quad({ p, n, uvs, rgba, flipDiagonal, outward, shader }: QuadInput) {
+  quad({ p, n, uvs, rgba, anim, flipDiagonal, outward, shader }: QuadInput) {
     const base = this.vertices;
     for (let i = 0; i < 4; i++) {
       this.pos.push(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
       this.nor.push(n[0], n[1], n[2]);
       this.uv.push(uvs[i * 2], uvs[i * 2 + 1]);
       this.col.push(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]);
+      this.anim.push(anim[0], anim[1], anim[2]);
       if (shader) this.pushShader(shader, p, i);
     }
     // Winding is derived from the geometry rather than assumed from vanilla's corner
@@ -181,10 +215,11 @@ class LayerBuilder {
     if (!this.idx.length) return undefined;
     return {
       positions: new Float32Array(this.pos),
-      normals: new Float32Array(this.nor),
-      uvs: new Float32Array(this.uv),
-      colors: new Float32Array(this.col),
+      normals: toSnorm8(this.nor),
+      uvs: toUnorm16(this.uv),
+      colors: toUnorm8(this.col),
       indices: new Uint32Array(this.idx),
+      anim: new Float32Array(this.anim),
       shader: this.lm.length
         ? {
           lightmap: new Float32Array(this.lm),
@@ -194,6 +229,47 @@ class LayerBuilder {
         : undefined,
     };
   }
+}
+
+/**
+ * NARROWER VERTEX ATTRIBUTES, because the memory ceiling is the thing that decides how much world
+ * can be resident at once.
+ *
+ * A vertex cost 60 bytes: position 12, normal 12, uv 8, colour 16, anim 12. Three of those are
+ * carrying far more precision than their contents can use, and the section budget pays for every
+ * one of them -- at a 448 MB ceiling the format IS the view distance. Narrowing normal, uv and
+ * colour takes a vertex to 35 bytes, so the same ceiling holds ~70% more world and rotating costs
+ * proportionally less re-meshing.
+ *
+ * Each is exact enough for what it carries, which is why this is a free win rather than a trade:
+ *
+ *   normal   axis-aligned unit vectors. int8 normalized represents -1, 0 and +1 EXACTLY
+ *            (127 maps to 1.0), and no block face has a normal that is not one of those.
+ *   uv       atlas coordinates in 0..1. uint16 is 65536 steps across an atlas a couple of
+ *            thousand pixels wide -- about thirty steps per texel.
+ *   colour   light x shade x AO x biome tint, all in 0..1, displayed on an 8-bit-per-channel
+ *            screen. uint8 is the precision the picture actually has.
+ *
+ * Position stays float32: it is section-local but still needs sub-texel accuracy for the model
+ * geometry the registry bakes. `anim` stays float32 because `vStep` is a small fraction and the
+ * frame counters beside it are not, so no single normalized encoding fits all three.
+ */
+export function toSnorm8(v: number[]): Int8Array {
+  const out = new Int8Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = Math.round(Math.max(-1, Math.min(1, v[i]!)) * 127);
+  return out;
+}
+
+export function toUnorm16(v: number[]): Uint16Array {
+  const out = new Uint16Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = Math.round(Math.max(0, Math.min(1, v[i]!)) * 65535);
+  return out;
+}
+
+export function toUnorm8(v: number[]): Uint8Array {
+  const out = new Uint8Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = Math.round(Math.max(0, Math.min(1, v[i]!)) * 255);
+  return out;
 }
 
 export interface MeshContext {
@@ -216,6 +292,8 @@ export interface MeshContext {
    * turtle is drawn once — where it is — and not also where the last flush left it.
    */
   hidden?: ReadonlyMap<string, ReadonlySet<number>>;
+  /** block id -> the sprite its model draws with; filled lazily by materialTexture */
+  materials?: Map<string, string | null>;
 }
 
 export function makeContext(
@@ -225,6 +303,87 @@ export function makeContext(
   biomes: TintLookup,
 ): MeshContext {
   return { world, registry, atlas, biomes, states: [] };
+}
+
+/**
+ * The fluid surface for this cell, or an empty list when there is no fluid here.
+ *
+ * Neighbour-aware, which is exactly why it lives in the mesher rather than the registry: a
+ * `RenderableState` is context-free and shared by every cell with that state, but a fluid's
+ * corners depend on the eight cells around it. Two ponds at different levels are the same
+ * state and must not be the same geometry.
+ */
+/**
+ * The synthetic states the fluid surface is drawn AS.
+ *
+ * A waterlogged fence is a cutout, untinted state; its water is neither. Emitting the fluid
+ * under the host block's state would put the ocean in the cutout layer (opaque, no blending)
+ * and hand it the fence's absent tint (white water). So the fluid gets its own state — which
+ * for a pure water block is exactly the state it already had, making the two paths identical.
+ */
+const WATER_STATE = {
+  key: 'minecraft:water', name: 'minecraft:water', props: { level: '0' },
+  quads: [] as BakedQuad[], renderType: 'translucent' as const, opaqueFullCube: false,
+  ambientOcclusion: false, tintSource: 2 as const, provenance: 'fluid' as const,
+  lightEmission: 0,
+};
+const LAVA_STATE = {
+  ...WATER_STATE, key: 'minecraft:lava', name: 'minecraft:lava',
+  tintSource: -1 as const, lightEmission: 15,
+};
+
+/** Emit the fluid a cell holds, if any. Returns how many quads were written. */
+function emitFluid(ctx: MeshContext, b: BlockCtx, getBuilder: (l: Layer) => LayerBuilder): number {
+  if (!holdsFluid(b.state.name, b.state.props)) return 0;
+  const quads = fluidQuadsFor(ctx, b);
+  if (!quads.length) return 0;
+  const kind = fluidOf(b.state.name, b.state.props)?.kind;
+  const base = kind === 'lava' ? LAVA_STATE : WATER_STATE;
+  const state: RenderableState = { ...base, quads };
+  return emitBlock(
+    ctx,
+    { ...b, state, tint: tintOf(ctx, state, b.wx, b.wy, b.wz) },
+    getBuilder,
+  );
+}
+
+function fluidQuadsFor(ctx: MeshContext, b: BlockCtx): BakedQuad[] {
+  const cell = fluidOf(b.state.name, b.state.props);
+  if (!cell) return [];
+  const fluidAt = (dx: number, dy: number, dz: number): FluidCell | null => {
+    const id = ctx.world.getState(b.wx + dx, b.wy + dy, b.wz + dz);
+    if (id === AIR_ID) return null;
+    const st = stateOf(ctx, id);
+    const f = fluidOf(st.name, st.props);
+    return f && f.kind === cell.kind ? f : null;
+  };
+  const around: Array<number | null> = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) around.push(fluidAt(dx, 0, dz)?.height ?? null);
+  }
+  const above = fluidAt(0, 1, 0) !== null;
+  const corners = cornerHeights(cell, { above, around });
+
+  // Culling. No face between two cells of the SAME fluid — an ocean must not be a lattice
+  // of internal walls — and no face into an opaque neighbour.
+  const opaque = (dx: number, dy: number, dz: number): boolean => {
+    const id = ctx.world.getState(b.wx + dx, b.wy + dy, b.wz + dz);
+    if (id === AIR_ID) return false;
+    return stateOf(ctx, id).opaqueFullCube;
+  };
+  const hidden = (dx: number, dy: number, dz: number): boolean =>
+    fluidAt(dx, dy, dz) !== null || opaque(dx, dy, dz);
+  const faces = {
+    // The top is drawn only when the cell above is not the same fluid: otherwise every
+    // layer of a deep ocean draws a surface and they z-fight all the way down.
+    up: !above && !opaque(0, 1, 0),
+    down: !hidden(0, -1, 0),
+    north: !hidden(0, 0, -1),
+    south: !hidden(0, 0, 1),
+    west: !hidden(-1, 0, 0),
+    east: !hidden(1, 0, 0),
+  };
+  return fluidQuads(cell, corners, faces);
 }
 
 function stateOf(ctx: MeshContext, id: number): RenderableState {
@@ -352,9 +511,29 @@ function isCulled(ctx: MeshContext, b: BlockCtx, q: BakedQuad): boolean {
   );
 }
 
-/** The light sample a face is lit by: the neighbour it faces, as vanilla does. */
+/**
+ * The light sample a quad is lit by, as vanilla does — and the two cases are not the same.
+ *
+ * A quad WITH a cullface is flush with the block boundary, so it is lit by the cell it faces
+ * into: the air in front of it, never the solid it belongs to. (A cube lit by its own cell
+ * would be black, since the light inside an opaque block is 0.)
+ *
+ * A quad WITHOUT one lives inside its own block — the X of a grass cross, a torch, a fence
+ * post, a flower — and offsetting its sample reads whatever is next door. Next door to a plant
+ * is very often a wall, `getLight` inside a wall is 0, and `faceBrightness(0)` is 0.05, so the
+ * plant was drawn at five percent brightness: "transparent blocks such as grass when they are
+ * next to a solid block, they become very dark" (the user, 2026-09-11).
+ *
+ * Vanilla splits it on exactly this line, in `ModelBlockRenderer`: the quads it fetches per
+ * direction are lit from `pos.relative(direction)`, and the general bucket — `getQuads(state,
+ * null, ...)`, the ones with no cullface — is lit from `pos` itself.
+ *
+ * The offset follows the CULLFACE, not the facing. They coincide on a cube, and where a model
+ * gives them different values the cullface is the one that says which boundary the quad is on.
+ */
 function quadLight(ctx: MeshContext, b: BlockCtx, q: BakedQuad): number {
-  const d = DIR_VEC[q.facing];
+  if (!q.cullface) return ctx.world.getLight(b.wx, b.wy, b.wz);
+  const d = DIR_VEC[q.cullface];
   return ctx.world.getLight(b.wx + d[0], b.wy + d[1], b.wz + d[2]);
 }
 
@@ -430,6 +609,8 @@ function emitBlock(ctx: MeshContext, b: BlockCtx, getBuilder: (l: Layer) => Laye
       n: q.normal,
       uvs: auv,
       rgba,
+      // `sv` is exactly one frame's height in atlas UV, which is the per-frame step.
+      anim: [sprite.frames, sprite.frametime, sv],
       flipDiagonal: flip,
       outward: quadOutward(q),
       shader: ctx.blockIdOf
@@ -447,6 +628,55 @@ function emitBlock(ctx: MeshContext, b: BlockCtx, getBuilder: (l: Layer) => Laye
 }
 
 const NO_HIDDEN: ReadonlySet<number> = new Set();
+const NO_RETEXTURE: ReadonlyMap<number, ReadonlyMap<string, string>> = new Map();
+
+/**
+ * Blocks in this section whose textures come from their block entity.
+ *
+ * Built once per section, like `hiddenIn`: almost every section has no such block, and a
+ * per-block block-entity lookup would cost 4,096 map probes a section for nothing.
+ */
+function retexturedIn(
+  ctx: MeshContext, cx: number, cy: number, cz: number,
+): ReadonlyMap<number, ReadonlyMap<string, string>> {
+  const col = ctx.world.getChunk(cx, cz);
+  if (!col || col.blockEntities.size === 0) return NO_RETEXTURE;
+  const baseY = cy << 4;
+  let out: Map<number, ReadonlyMap<string, string>> | null = null;
+  for (const be of col.blockEntities.values()) {
+    const wy = be.y as number;
+    if (typeof wy !== 'number' || wy < baseY || wy >= baseY + 16) continue;
+    const map = textureMapOf(be as Record<string, unknown>);
+    if (!map) continue;
+    const i = (((wy - baseY) & 15) << 8) | (((be.z as number) & 15) << 4) | ((be.x as number) & 15);
+    (out ??= new Map()).set(i, map);
+  }
+  return out ?? NO_RETEXTURE;
+}
+
+/**
+ * The sprite a material block draws with: its own model's most-used texture.
+ *
+ * Resolved through the registry rather than guessed from the name, so a mod's material
+ * works. Cached on the context because a wall of the same material asks the same question
+ * for every block in it.
+ */
+function materialTexture(ctx: MeshContext, blockId: string): string | null {
+  const hit = ctx.materials?.get(blockId);
+  if (hit !== undefined) return hit;
+  let best: string | null = null;
+  try {
+    const st = ctx.registry.resolve(blockId);
+    const counts = new Map<string, number>();
+    for (const q of st.quads) counts.set(q.texture, (counts.get(q.texture) ?? 0) + 1);
+    let top = 0;
+    for (const [tex, n] of counts) if (n > top) { top = n; best = tex; }
+  } catch {
+    best = null;
+  }
+  (ctx.materials ??= new Map()).set(blockId, best);
+  return best;
+}
 
 /** The live view's hidden blocks for this section, or none. */
 function hiddenIn(ctx: MeshContext, cx: number, cy: number, cz: number): ReadonlySet<number> {
@@ -479,12 +709,15 @@ export function meshSection(
   let quadCount = 0;
   // Looked up once per section, not once per block: almost every section has nothing hidden.
   const hiddenHere = hiddenIn(ctx, cx, cy, cz);
+  const retexturedHere = retexturedIn(ctx, cx, cy, cz);
 
   for (let i = 0; i < SECTION_VOLUME; i++) {
     const id = blockIdAt(section, hiddenHere, i);
     if (id === AIR_ID) continue;
     const state = stateOf(ctx, id);
-    if (!state.quads.length) continue;
+    // A fluid state has NO quads — its geometry is generated below — so the cheap
+    // "nothing to draw" skip has to let it through or the ocean never reaches the mesher.
+    if (!state.quads.length && !holdsFluid(state.name, state.props)) continue;
 
     const lx = i & 15;
     const lz = (i >> 4) & 15;
@@ -492,9 +725,22 @@ export function meshSection(
     const wx = baseX + lx;
     const wy = baseY + ly;
     const wz = baseZ + lz;
+    quadCount += emitFluid(
+      ctx,
+      { state, wx, wy, wz, lx, ly, lz, tint: NO_TINT },
+      getBuilder,
+    );
+    // A block entity carrying a texture map makes this block a different material from the
+    // one its model names — see render/retexture.ts. The substitution happens here rather
+    // than in the registry because a `RenderableState` is shared by every cell with that
+    // state, and two Domum blocks of the same state are routinely different materials.
+    const remap = retexturedHere.get(i);
+    const drawn = remap
+      ? { ...state, quads: retextureQuads(state.quads, remap, (b) => materialTexture(ctx, b)) as BakedQuad[] }
+      : state;
     quadCount += emitBlock(
       ctx,
-      { state, wx, wy, wz, lx, ly, lz, tint: tintOf(ctx, state, wx, wy, wz) },
+      { state: drawn, wx, wy, wz, lx, ly, lz, tint: tintOf(ctx, state, wx, wy, wz) },
       getBuilder,
     );
   }

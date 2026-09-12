@@ -70,7 +70,12 @@ export function placement(m: Pick<LiveMonitor, 'x' | 'y' | 'z' | 'facing' | 'wid
 }
 
 /** Columns and rows a panel shows at text scale 1. */
-export function gridOf(m: Pick<LiveMonitor, 'width' | 'height'>): { cols: number; rows: number } {
+export function gridOf(
+  m: Pick<LiveMonitor, 'width' | 'height'> & Partial<Pick<LiveMonitor, 'cols' | 'rows'>>,
+): { cols: number; rows: number } {
+  // A source that knows the terminal's real size beats one that infers it from block count
+  // and an assumed text scale. See the note on `cols` in live.ts.
+  if (m.cols && m.rows) return { cols: m.cols, rows: m.rows };
   return { cols: m.width * COLS_PER_BLOCK, rows: m.height * ROWS_PER_BLOCK };
 }
 
@@ -161,18 +166,35 @@ export class MonitorScreens {
   private paint(s: Screen, m: LiveMonitor): void {
     const { cols, rows } = gridOf(m);
     const lines = fitLines(m.lines, cols, rows);
-    const signature = `${m.bg}|${m.fg}|${lines.join('\n')}`;
+    // The per-cell grids are part of the signature: a screen whose text is unchanged but
+    // whose highlight moved must still repaint.
+    const signature = `${m.bg}|${m.fg}|${lines.join('\n')}`
+      + `|${m.fgCells?.join('') ?? ''}|${m.bgCells?.join('') ?? ''}`;
     if (signature === s.painted) return;
     const ctx = s.canvas.getContext('2d');
     if (!ctx) return;
+    const cell = cellColours(m);
     ctx.fillStyle = m.bg;
     ctx.fillRect(0, 0, s.canvas.width, s.canvas.height);
-    ctx.fillStyle = m.fg;
     ctx.font = `bold ${Math.round(CELL_H * 0.78)}px ui-monospace, Menlo, Consolas, monospace`;
     ctx.textBaseline = 'middle';
+    if (cell) {
+      // Backgrounds first, as whole cells, so a highlighted run reads as a band rather than
+      // as coloured letters on the screen's own background.
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < lines[r].length; c++) {
+          const bg = cell.bg(r, c);
+          if (!bg || bg === m.bg) continue;
+          ctx.fillStyle = bg;
+          ctx.fillRect(c * CELL_W, r * CELL_H, CELL_W, CELL_H);
+        }
+      }
+    }
+    ctx.fillStyle = m.fg;
     for (let r = 0; r < rows; r++) {
       const line = lines[r];
       for (let c = 0; c < line.length; c++) {
+        if (cell) ctx.fillStyle = cell.fg(r, c) ?? m.fg;
         ctx.fillText(line[c], c * CELL_W + 1, r * CELL_H + CELL_H / 2, CELL_W);
       }
     }
@@ -186,4 +208,40 @@ export class MonitorScreens {
     (s.mesh.material as THREE.Material).dispose();
     s.texture.dispose();
   }
+}
+
+/**
+ * Per-cell colour lookups for a monitor, or null when the source carries none.
+ *
+ * `palette[parseInt(digit, 16)]` and NOT `palette[15 - digit]`: the proxy has already undone
+ * CC's storage order, and reversing a second time produces a screen that looks deliberately
+ * inverted rather than obviously broken. A digit outside the palette, or a row shorter than
+ * its line, falls back to the screen colour rather than to an arbitrary entry.
+ */
+export function cellColours(m: LiveMonitor): {
+  fg: (r: number, c: number) => string | null;
+  bg: (r: number, c: number) => string | null;
+} | null {
+  const pal = m.palette;
+  if (!pal || pal.length === 0 || (!m.fgCells && !m.bgCells)) return null;
+  const pick = (grid: readonly string[] | undefined, r: number, c: number): string | null => {
+    const row = grid?.[r];
+    if (!row || c >= row.length) return null;
+    const i = parseInt(row[c], 16);
+    return Number.isFinite(i) && i >= 0 && i < pal.length ? pal[i] : null;
+  };
+  return {
+    fg: (r, c) => pick(m.fgCells, r, c),
+    bg: (r, c) => pick(m.bgCells, r, c),
+  };
+}
+
+/**
+ * Whether a panel carries per-character colour.
+ *
+ * The test for "is this the richer description of the same panel": a source with a grid can
+ * say everything a source without one can, and more.
+ */
+export function hasCellColour(m: LiveMonitor): boolean {
+  return Boolean(m.palette?.length && (m.fgCells?.length || m.bgCells?.length));
 }

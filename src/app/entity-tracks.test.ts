@@ -28,6 +28,10 @@ function sample(over: Partial<EntitySample> & { uuid: string }): EntitySample {
     name: null,
     item: null,
     block: null,
+    appearance: { key: '', layers: [{ model: null, texture: null, tint: null }] },
+    held: [],
+    facing: null,
+    rotation: null,
     ...over,
   };
 }

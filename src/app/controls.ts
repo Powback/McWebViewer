@@ -46,6 +46,19 @@ export class FlyControls {
     this.bindTouch();
   }
 
+  /**
+   * Whether clicking the canvas should capture the pointer.
+   *
+   * False in isometric mode. Set by whoever owns the camera mode rather than read from it here, so
+   * this class keeps knowing nothing about live view, joining or cameras.
+   */
+  pointerLockAllowed = true;
+
+  /** Release the pointer if this control currently holds it. Safe to call when it does not. */
+  releasePointer(): void {
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
   private bindKeyboard(): void {
     addEventListener('keydown', (e) => {
       this.keys.add(e.code);
@@ -56,6 +69,10 @@ export class FlyControls {
 
   private bindMouse(): void {
     this.canvas.addEventListener('click', () => {
+      // NOT IN ISOMETRIC. There is nothing to mouselook at from a fixed overhead camera, and the
+      // lock actively fights that mode: a captured pointer swallows the drag-to-rotate gesture and
+      // every click on the page's own controls, so you have to press Escape to reach a button.
+      if (!this.pointerLockAllowed) return;
       // Pointer lock does not exist on touch and requesting it there throws; the touch
       // handlers own those devices.
       if (matchMedia('(pointer: fine)').matches) void this.canvas.requestPointerLock();

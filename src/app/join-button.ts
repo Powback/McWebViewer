@@ -37,8 +37,30 @@ const HIDDEN: JoinVisual = { hidden: true, disabled: true, label: 'Join', leavin
  * button appears immediately, disabled, rather than popping in later and moving the
  * layout under a thumb that is already reaching for it.
  */
-export function buttonState(control: ControlState | null, live: boolean): JoinVisual {
+export function buttonState(
+  control: ControlState | null,
+  live: boolean,
+  sourceKind: 'bridge' | 'spacetime' = 'bridge',
+): JoinVisual {
   if (!live) return HIDDEN;
+  // SPACETIME IS A READ-ONLY MIRROR. It carries the world — chunks, light, entities,
+  // players, block entities — and has no channel for sending input back to the server at
+  // all. Control (join, movement, the fake player) exists only through the RCON bridge,
+  // which this mode deliberately does not open.
+  //
+  // So the button is disabled for a REAL reason, and must say that reason. It used to fall
+  // through to "connecting to the bridge...", which is a lie twice over: nothing is
+  // connecting, and nothing ever will.
+  if (sourceKind === 'spacetime' && !control) {
+    return {
+      hidden: false,
+      disabled: true,
+      label: 'Join',
+      leaving: false,
+      why: 'View only: spacetime is a read-only mirror and has no control channel.'
+        + ' Playing needs the bridge — switch the source to bridge.',
+    };
+  }
   if (!control) {
     return { hidden: false, disabled: true, label: 'Join', leaving: false, why: 'connecting to the bridge...' };
   }
@@ -93,8 +115,12 @@ export class JoinButton {
     });
   }
 
-  render(control: ControlState | null, live: boolean): void {
-    const v = buttonState(control, live);
+  render(
+    control: ControlState | null,
+    live: boolean,
+    sourceKind: 'bridge' | 'spacetime' = 'bridge',
+  ): void {
+    const v = buttonState(control, live, sourceKind);
     const { button, why } = this.deps;
     this.leaving = v.leaving;
     button.hidden = v.hidden;
